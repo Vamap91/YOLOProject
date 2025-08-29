@@ -1,26 +1,24 @@
 import streamlit as st
-import cv2
 import numpy as np
 from PIL import Image
-import io
-import tempfile
 import os
 from ultralytics import YOLO
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
 
-# Configuração da página
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
 st.set_page_config(
-    page_title="🚗 Detector de Danos Veiculares",
+    page_title="Detector de Danos Veiculares",
     page_icon="🚗",
     layout="wide"
 )
 
-# Cache do modelo para evitar recarregamento
 @st.cache_resource
 def load_model():
-    """Carrega o modelo YOLO treinado"""
     try:
         model = YOLO('trained.pt')
         return model
@@ -29,14 +27,9 @@ def load_model():
         return None
 
 def process_image(image, model):
-    """Processa a imagem e retorna os resultados da detecção"""
-    # Converte PIL para array numpy
     img_array = np.array(image)
-    
-    # Executa a inferência
     results = model(img_array)
     
-    # Extrai informações das detecções
     detections = []
     if len(results[0].boxes) > 0:
         boxes = results[0].boxes
@@ -48,14 +41,16 @@ def process_image(image, model):
             }
             detections.append(detection)
     
-    # Obtém imagem com annotations
-    annotated_img = results[0].plot()
-    annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+    try:
+        annotated_img = results[0].plot()
+        if cv2 is not None:
+            annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+    except:
+        annotated_img = img_array
     
     return detections, annotated_img
 
 def create_detection_summary(detections):
-    """Cria resumo das detecções encontradas"""
     if not detections:
         return "Nenhum dano detectado na imagem."
     
@@ -79,7 +74,6 @@ def create_detection_summary(detections):
     return "\n".join(summary)
 
 def create_confidence_chart(detections):
-    """Cria gráfico de barras com as confidências das detecções"""
     if not detections:
         return None
     
@@ -106,26 +100,24 @@ def create_confidence_chart(detections):
     
     return fig
 
-# Interface principal
 def main():
-    st.title("🚗 Detector de Danos Veiculares")
+    st.title("Detector de Danos Veiculares")
     st.markdown("**Powered by YOLO11m** - Detecta automaticamente danos em veículos usando Inteligência Artificial")
     
-    # Sidebar com informações
     with st.sidebar:
-        st.header("ℹ️ Sobre o Sistema")
+        st.header("Sobre o Sistema")
         st.markdown("""
         Este sistema utiliza um modelo YOLO11m treinado especificamente para detectar:
         
-        - 🔹 **Amassados (Dents)**
-        - 🔹 **Riscos (Scratches)** 
-        - 🔹 **Rachaduras (Cracks)**
-        - 🔹 **Vidros Quebrados**
-        - 🔹 **Lâmpadas Quebradas**
-        - 🔹 **Pneus Vazios**
+        - Amassados (Dents)
+        - Riscos (Scratches) 
+        - Rachaduras (Cracks)
+        - Vidros Quebrados
+        - Lâmpadas Quebradas
+        - Pneus Vazios
         """)
         
-        st.header("🎯 Performance do Modelo")
+        st.header("Performance do Modelo")
         st.markdown("""
         **mAP50 por Classe:**
         - Vidros quebrados: 99.4%
@@ -136,24 +128,21 @@ def main():
         - Rachaduras: 62.0%
         """)
     
-    # Carrega o modelo
     model = load_model()
     if model is None:
-        st.error("❌ Não foi possível carregar o modelo. Verifique se o arquivo 'trained.pt' está disponível.")
+        st.error("Não foi possível carregar o modelo. Verifique se o arquivo 'trained.pt' está disponível.")
         return
     
-    st.success("✅ Modelo carregado com sucesso!")
+    st.success("Modelo carregado com sucesso!")
     
-    # Upload da imagem
-    st.header("📸 Upload da Imagem")
+    st.header("Upload da Imagem")
     uploaded_file = st.file_uploader(
         "Escolha uma imagem do veículo:",
         type=['png', 'jpg', 'jpeg'],
         help="Formatos aceitos: PNG, JPG, JPEG"
     )
     
-    # Exemplos de imagens
-    st.header("🖼️ Ou teste com exemplos:")
+    st.header("Ou teste com exemplos:")
     
     example_images = {
         "examples/1.png": "Dent - Amassado",
@@ -180,15 +169,13 @@ def main():
                 except:
                     st.error(f"Exemplo não encontrado: {img_path}")
     
-    # Verifica se há exemplo selecionado ou upload
     image_source = None
     image_name = None
     
-    # Verifica se foi selecionado um exemplo
     if 'uploaded_example' in st.session_state:
         image_source = st.session_state['uploaded_example']
         image_name = st.session_state['example_name']
-        st.info(f"📋 Usando exemplo: {image_name}")
+        st.info(f"Usando exemplo: {image_name}")
     elif uploaded_file is not None:
         image_source = Image.open(uploaded_file)
         image_name = "Imagem enviada"
@@ -197,28 +184,26 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("📷 Imagem Original")
+            st.subheader("Imagem Original")
             st.image(image_source, caption=image_name, use_column_width=True)
         
-        # Executa a detecção
-        with st.spinner("🔍 Analisando imagem..."):
+        with st.spinner("Analisando imagem..."):
             detections, annotated_img = process_image(image_source, model)
         
         with col2:
-            st.subheader("🎯 Detecções Encontradas")
+            st.subheader("Detecções Encontradas")
             st.image(annotated_img, caption="Danos detectados", use_column_width=True)
         
-        # Resumo das detecções
-        st.header("📊 Resumo da Análise")
+        st.header("Resumo da Análise")
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.markdown("### 📋 Detalhes dos Danos")
+            st.markdown("### Detalhes dos Danos")
             summary = create_detection_summary(detections)
             st.markdown(summary)
         
         with col2:
-            st.markdown("### 📈 Gráfico de Confiança")
+            st.markdown("### Gráfico de Confiança")
             if detections:
                 chart = create_confidence_chart(detections)
                 if chart:
@@ -226,9 +211,8 @@ def main():
             else:
                 st.info("Nenhum dano detectado para exibir no gráfico.")
         
-        # Tabela detalhada
         if detections:
-            st.header("📑 Detalhes Técnicos")
+            st.header("Detalhes Técnicos")
             df_detections = pd.DataFrame(detections)
             df_detections['confidence'] = df_detections['confidence'].apply(lambda x: f"{x:.1%}")
             df_detections['class'] = df_detections['class'].str.replace('_', ' ').str.title()
@@ -238,22 +222,20 @@ def main():
             })
             st.dataframe(df_detections, use_container_width=True)
         
-        # Recomendações
         if detections:
-            st.header("💡 Recomendações")
+            st.header("Recomendações")
             if any(d['class'] == 'shattered_glass' for d in detections):
-                st.warning("⚠️ **Vidro quebrado detectado** - Reparo urgente necessário por questões de segurança.")
+                st.warning("**Vidro quebrado detectado** - Reparo urgente necessário por questões de segurança.")
             if any(d['class'] == 'flat_tire' for d in detections):
-                st.warning("⚠️ **Pneu vazio detectado** - Verifique o pneu antes de dirigir.")
+                st.warning("**Pneu vazio detectado** - Verifique o pneu antes de dirigir.")
             if any(d['class'] == 'broken_lamp' for d in detections):
-                st.info("🔧 **Lâmpada quebrada** - Substitua para manter a segurança no trânsito.")
+                st.info("**Lâmpada quebrada** - Substitua para manter a segurança no trânsito.")
             
             high_conf_damages = [d for d in detections if d['confidence'] > 0.8]
             if high_conf_damages:
-                st.success(f"✅ {len(high_conf_damages)} dano(s) detectado(s) com alta confiança.")
+                st.success(f"{len(high_conf_damages)} dano(s) detectado(s) com alta confiança.")
         
-        # Botão para limpar seleção
-        if st.button("🔄 Testar Nova Imagem"):
+        if st.button("Testar Nova Imagem"):
             if 'uploaded_example' in st.session_state:
                 del st.session_state['uploaded_example']
             if 'example_name' in st.session_state:
@@ -261,14 +243,13 @@ def main():
             st.rerun()
     
     else:
-        st.info("👆 Faça upload de uma imagem ou selecione um exemplo para começar a análise.")
+        st.info("Faça upload de uma imagem ou selecione um exemplo para começar a análise.")
     
-    # Footer
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center'>
-        <p><strong>🤖 Sistema de Detecção de Danos Veiculares</strong></p>
-        <p>Desenvolvido com YOLO11m + Streamlit | <a href='https://github.com/seu-usuario/vehicle-damage-detector'>📁 Código no GitHub</a></p>
+        <p><strong>Sistema de Detecção de Danos Veiculares</strong></p>
+        <p>Desenvolvido com YOLO11m + Streamlit</p>
     </div>
     """, unsafe_allow_html=True)
 
