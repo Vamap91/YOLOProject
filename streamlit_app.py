@@ -100,7 +100,9 @@ def create_confidence_chart(detections):
         showlegend=False
     )
     
-    fig.update_yaxis(tickformat='.0%')
+    fig.update_layout(
+    yaxis=dict(tickformat='.0%')
+    )
     
     return fig
 
