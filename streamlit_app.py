@@ -152,29 +152,57 @@ def main():
         help="Formatos aceitos: PNG, JPG, JPEG"
     )
     
-    # Exemplos de imagens (opcional)
+    # Exemplos de imagens
     st.header("🖼️ Ou teste com exemplos:")
-    col1, col2, col3 = st.columns(3)
     
     example_images = {
-        "Carro com amassados": "https://via.placeholder.com/300x200?text=Exemplo+1",
-        "Vidro quebrado": "https://via.placeholder.com/300x200?text=Exemplo+2", 
-        "Riscos na lataria": "https://via.placeholder.com/300x200?text=Exemplo+3"
+        "examples/1.png": "Dent - Amassado",
+        "examples/2.png": "Múltiplos Danos", 
+        "examples/3.png": "Vidro Estilhaçado",
+        "examples/4.png": "Lâmpada Quebrada",
+        "examples/5.png": "Dent - Lateral",
+        "examples/6.png": "Riscos",
+        "examples/7.png": "Múltiplos Riscos"
     }
     
-    if uploaded_file is not None:
-        # Processa a imagem
-        image = Image.open(uploaded_file)
-        
+    col1, col2, col3 = st.columns(3)
+    cols = [col1, col2, col3]
+    
+    for i, (img_path, label) in enumerate(example_images.items()):
+        with cols[i % 3]:
+            if st.button(label, key=f"example_{i}"):
+                try:
+                    if os.path.exists(img_path):
+                        example_image = Image.open(img_path)
+                        st.session_state['uploaded_example'] = example_image
+                        st.session_state['example_name'] = label
+                        st.rerun()
+                except:
+                    st.error(f"Exemplo não encontrado: {img_path}")
+    
+    # Verifica se há exemplo selecionado ou upload
+    image_source = None
+    image_name = None
+    
+    # Verifica se foi selecionado um exemplo
+    if 'uploaded_example' in st.session_state:
+        image_source = st.session_state['uploaded_example']
+        image_name = st.session_state['example_name']
+        st.info(f"📋 Usando exemplo: {image_name}")
+    elif uploaded_file is not None:
+        image_source = Image.open(uploaded_file)
+        image_name = "Imagem enviada"
+    
+    if image_source is not None:
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("📷 Imagem Original")
-            st.image(image, caption="Imagem enviada", use_column_width=True)
+            st.image(image_source, caption=image_name, use_column_width=True)
         
         # Executa a detecção
         with st.spinner("🔍 Analisando imagem..."):
-            detections, annotated_img = process_image(image, model)
+            detections, annotated_img = process_image(image_source, model)
         
         with col2:
             st.subheader("🎯 Detecções Encontradas")
@@ -223,9 +251,17 @@ def main():
             high_conf_damages = [d for d in detections if d['confidence'] > 0.8]
             if high_conf_damages:
                 st.success(f"✅ {len(high_conf_damages)} dano(s) detectado(s) com alta confiança.")
+        
+        # Botão para limpar seleção
+        if st.button("🔄 Testar Nova Imagem"):
+            if 'uploaded_example' in st.session_state:
+                del st.session_state['uploaded_example']
+            if 'example_name' in st.session_state:
+                del st.session_state['example_name']
+            st.rerun()
     
     else:
-        st.info("👆 Faça upload de uma imagem para começar a análise.")
+        st.info("👆 Faça upload de uma imagem ou selecione um exemplo para começar a análise.")
     
     # Footer
     st.markdown("---")
