@@ -20,7 +20,11 @@ st.set_page_config(
 @st.cache_resource
 def load_model():
     try:
-        model = YOLO('trained.pt')
+        import urllib.request
+        model_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt"
+        if not os.path.exists('yolo11m.pt'):
+            urllib.request.urlretrieve(model_url, 'yolo11m.pt')
+        model = YOLO('yolo11m.pt')
         return model
     except Exception as e:
         st.error(f"Erro ao carregar o modelo: {str(e)}")
