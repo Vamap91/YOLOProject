@@ -3,4 +3,4 @@ ultralytics
 opencv-python-headless
 pandas
 plotly
-fpdf
+requests
