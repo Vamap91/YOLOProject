@@ -17,88 +17,39 @@ def load_damage_model():
     model_path = "yolov8m.pt"
     
     if not os.path.exists(model_path):
-        st.info("🔄 Baixando modelo personalizado do Google Drive...")
-        
-        # URL corrigida para download direto do Google Drive
-        file_id = "1ey-QZYRu-SgbT_PF1nXb0ag9V8tOAVU5"
-        drive_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+        st.warning("Modelo personalizado não encontrado. Usando YOLOv8m base.")
+        st.info("Para usar seu modelo personalizado, faça upload do arquivo yolov8m.pt")
         
         try:
-            import requests
-            import time
-            
-            session = requests.Session()
-            
-            # Primeira requisição para pegar o token de confirmação se necessário
-            response = session.get(drive_url, stream=True)
-            
-            # Verifica se precisa de confirmação para arquivos grandes
-            if 'download_warning' in response.text:
-                # Procura pelo token de confirmação
-                for line in response.text.splitlines():
-                    if 'confirm=' in line:
-                        token = line.split('confirm=')[1].split('&')[0].split('"')[0]
-                        drive_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={token}"
-                        break
-                
-                # Nova requisição com token
-                response = session.get(drive_url, stream=True)
-            
-            # Verifica se a resposta é um arquivo válido
-            content_type = response.headers.get('content-type', '')
-            if 'text/html' in content_type:
-                st.error("❌ Google Drive retornou HTML em vez do arquivo")
-                st.info("💡 Tente tornar o arquivo público e verificar as permissões")
-                return None, False
-            
-            if response.status_code == 200:
-                total_size = int(response.headers.get('content-length', 0))
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                with open(model_path, "wb") as f:
-                    downloaded = 0
-                    start_time = time.time()
-                    
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            
-                            if total_size > 0:
-                                progress = downloaded / total_size
-                                progress_bar.progress(progress)
-                                
-                                elapsed_time = time.time() - start_time
-                                if elapsed_time > 0:
-                                    speed = downloaded / elapsed_time / 1024 / 1024
-                                    status_text.text(f"Baixando: {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB ({speed:.1f} MB/s)")
-                
-                progress_bar.empty()
-                status_text.empty()
-                
-                # Verifica se o arquivo baixado é válido
-                if os.path.getsize(model_path) < 1024:  # Menor que 1KB provavelmente é HTML
-                    os.remove(model_path)
-                    st.error("❌ Arquivo baixado inválido (muito pequeno)")
-                    return None, False
-                
-                st.success("✅ Modelo baixado com sucesso!")
-                
-            else:
-                st.error(f"❌ Erro ao baixar modelo. Status: {response.status_code}")
-                return None, False
-                
+            model = YOLO('yolov8m.pt')
+            return model, False
         except Exception as e:
-            st.error(f"❌ Erro ao baixar modelo: {e}")
-            st.info("💡 Usando modelo base como fallback")
+            st.error(f"Erro ao carregar modelo base: {e}")
+            return None, False
+    else:
+        try:
+            # Verifica se o arquivo não é HTML
+            with open(model_path, 'rb') as f:
+                first_bytes = f.read(10)
+                if b'<' in first_bytes:
+                    st.error("Arquivo corrompido (HTML baixado). Removendo...")
+                    os.remove(model_path)
+                    model = YOLO('yolov8m.pt')
+                    return model, False
+            
+            model = YOLO(model_path)
+            st.success("Modelo personalizado carregado!")
+            return model, True
+        except Exception as e:
+            st.warning(f"Erro ao carregar modelo personalizado: {str(e)[:100]}")
+            st.info("Usando modelo base YOLOv8m")
+            
             try:
                 model = YOLO('yolov8m.pt')
                 return model, False
-            except:
+            except Exception as e2:
+                st.error(f"Falha total: {e2}")
                 return None, False
-    
-    try:
         # Primeiro tenta carregar normalmente
         model = YOLO(model_path)
         st.success("✅ Modelo YOLOv8m personalizado carregado!")
