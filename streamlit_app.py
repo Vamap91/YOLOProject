@@ -149,10 +149,10 @@ def simulate_damage_analysis(detections):
                 'damage_id': "SIM_001",
                 'class': 'dent',
                 'class_display': 'Amassado (Análise Simulada)',
-                'confidence': max_confidence * 0.8,
+                'confidence': float(max_confidence * 0.8),
                 'severity': 'Moderado',
                 'location': 'Carroceria',
-                'estimated_cost': np.random.randint(500, 1500),
+                'estimated_cost': int(np.random.randint(500, 1500)),
                 'bbox': {'x1': 100, 'y1': 100, 'x2': 200, 'y2': 200}
             })
         
@@ -161,10 +161,10 @@ def simulate_damage_analysis(detections):
                 'damage_id': "SIM_002",
                 'class': 'scratch',
                 'class_display': 'Possível Risco (Análise Simulada)',
-                'confidence': max_confidence * 0.6,
+                'confidence': float(max_confidence * 0.6),
                 'severity': 'Leve',
                 'location': 'Pintura',
-                'estimated_cost': np.random.randint(200, 600),
+                'estimated_cost': int(np.random.randint(200, 600)),
                 'bbox': {'x1': 150, 'y1': 150, 'x2': 250, 'y2': 180}
             })
     
@@ -306,8 +306,11 @@ def main():
             with col2:
                 st.metric("💰 Custo Estimado", f"R$ {total_cost:,.2f}")
             with col3:
-                avg_conf = np.mean([d['confidence'] for d in simulated_damages])
-                st.metric("📈 Confiança Média", f"{avg_conf:.1%}")
+                if simulated_damages:
+                    avg_conf = np.mean([d['confidence'] for d in simulated_damages])
+                    st.metric("📈 Confiança Média", f"{avg_conf:.1%}")
+                else:
+                    st.metric("📈 Confiança Média", "N/A")
             
             df_damages = pd.DataFrame(simulated_damages)
             df_display = df_damages[['damage_id', 'class_display', 'severity', 'estimated_cost']].copy()
