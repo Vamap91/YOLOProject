@@ -433,13 +433,31 @@ def main():
                 st.image(image_source, caption=image_name, use_column_width=True)
             
             with st.spinner("🔍 Analisando imagem... Aguarde..."):
-                detections, annotated_img = process_damage_detection(
-                    image_source, model, confidence_threshold, is_damage_model
-                )
+                if model is not None:
+                    detections, annotated_img = process_damage_detection(
+                        image_source, model, confidence_threshold, is_damage_model
+                    )
+                else:
+                    # Modo demonstração sem modelo
+                    detections = [
+                        {
+                            'damage_id': "DEMO_001",
+                            'class': 'dent',
+                            'class_display': 'Amassado (Demo)',
+                            'confidence': 0.75,
+                            'severity': 'Moderado',
+                            'location': 'Carroceria',
+                            'estimated_cost': 800,
+                            'bbox': {'x1': 100, 'y1': 100, 'x2': 200, 'y2': 200}
+                        }
+                    ]
+                    annotated_img = np.array(image_source)
                 
-                if not is_damage_model and detections:
+                if not is_damage_model and detections and model is not None:
                     st.warning("⚠️ **Atenção:** Resultados simulados - usando modelo genérico")
                     st.info("📋 Para detecção real, carregue o modelo personalizado `trained.pt`")
+                elif model is None:
+                    st.info("🎭 **Modo Demonstração:** Dados simulados para fins de teste")
             
             with col2:
                 st.markdown("#### 🎯 Detecções Encontradas")
