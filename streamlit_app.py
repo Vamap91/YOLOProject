@@ -3,7 +3,6 @@ from PIL import Image
 import pandas as pd
 import json
 import datetime
-import requests
 import os
 from ultralytics import YOLO
 
@@ -15,34 +14,65 @@ st.set_page_config(
 
 @st.cache_resource
 def load_damage_model():
-    model_url = "https://github.com/ReverendBayes/YOLO11m-Car-Damage-Detector/raw/main/trained.pt"
-    model_path = "trained.pt"
+    model_path = "yolov8m.pt"
     
     if not os.path.exists(model_path):
-        st.info("🔄 Baixando modelo YOLO11m especializado em danos...")
+        st.info("🔄 Baixando modelo personalizado do Google Drive...")
+        
+        drive_url = "https://drive.google.com/uc?export=download&id=1ey-QZYRu-SgbT_PF1nXb0ag9V8tOAVU5"
+        
         try:
-            response = requests.get(model_url, stream=True)
+            import requests
+            import time
+            
+            response = requests.get(drive_url, stream=True)
+            
             if response.status_code == 200:
+                total_size = int(response.headers.get('content-length', 0))
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
                 with open(model_path, "wb") as f:
+                    downloaded = 0
+                    start_time = time.time()
+                    
                     for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            if total_size > 0:
+                                progress = downloaded / total_size
+                                progress_bar.progress(progress)
+                                
+                                elapsed_time = time.time() - start_time
+                                if elapsed_time > 0:
+                                    speed = downloaded / elapsed_time / 1024 / 1024
+                                    status_text.text(f"Baixando: {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB ({speed:.1f} MB/s)")
+                
+                progress_bar.empty()
+                status_text.empty()
                 st.success("✅ Modelo baixado com sucesso!")
+                
             else:
-                st.error("❌ Erro ao baixar modelo. Usando modelo genérico.")
-                return YOLO('yolov8n.pt'), False
+                st.error(f"❌ Erro ao baixar modelo. Status: {response.status_code}")
+                return None, False
+                
         except Exception as e:
             st.error(f"❌ Erro ao baixar modelo: {e}")
-            return YOLO('yolov8n.pt'), False
+            st.info("📁 Certifique-se de que tem conexão com internet ou coloque o arquivo 'yolov8m.pt' manualmente na pasta")
+            return None, False
     
     try:
         model = YOLO(model_path)
+        st.success("✅ Modelo YOLOv8m personalizado carregado!")
         return model, True
     except Exception as e:
         st.error(f"❌ Erro ao carregar modelo: {e}")
-        return YOLO('yolov8n.pt'), False
+        return None, False
 
 def process_damage_detection(image, model, is_damage_model):
-    results = model(image)
+    results = model(image, conf=0.25, iou=0.45)
     detections = []
     
     if results and len(results) > 0 and hasattr(results[0], 'boxes') and results[0].boxes is not None:
@@ -55,34 +85,34 @@ def process_damage_detection(image, model, is_damage_model):
                     confidence = float(box.conf[0])
                     bbox = box.xyxy[0].cpu().numpy()
                     
-                    if confidence > 0.3:
-                        if is_damage_model:
+                    if confidence > 0.25:
+                        if is_damage_model and hasattr(model, 'names'):
                             class_name = model.names[class_id]
                             damage_type = class_name.replace('_', ' ').title()
                             
                             severity_map = {
-                                'shattered_glass': 'Severo',
-                                'flat_tire': 'Severo', 
-                                'broken_lamp': 'Moderado',
-                                'dent': 'Moderado',
+                                'shattered glass': 'Severo',
+                                'broken lamp': 'Severo',
+                                'flat tire': 'Severo',
+                                'dent': 'Moderado', 
                                 'scratch': 'Leve',
                                 'crack': 'Leve'
                             }
                             
                             location_map = {
-                                'shattered_glass': 'Para-brisa/Vidros',
-                                'flat_tire': 'Rodas',
-                                'broken_lamp': 'Faróis/Lanternas', 
+                                'shattered glass': 'Para-brisa/Vidros',
+                                'flat tire': 'Rodas',
+                                'broken lamp': 'Faróis/Lanternas',
                                 'dent': 'Carroceria',
-                                'scratch': 'Pintura',
+                                'scratch': 'Pintura', 
                                 'crack': 'Para-choque/Plásticos'
                             }
                             
-                            severity = severity_map.get(class_name, 'Moderado')
-                            location = location_map.get(class_name, 'Carroceria')
+                            severity = severity_map.get(class_name.lower(), 'Moderado')
+                            location = location_map.get(class_name.lower(), 'Carroceria')
                             
                         else:
-                            damage_type = "Dano Detectado"
+                            damage_type = f"Classe {class_id}"
                             severity = "Moderado"
                             location = "A definir"
                         
@@ -103,6 +133,7 @@ def process_damage_detection(image, model, is_damage_model):
                         detections.append(detection)
                         
                 except Exception as e:
+                    st.warning(f"Erro ao processar detecção {i}: {e}")
                     continue
     
     try:
@@ -128,7 +159,7 @@ def create_damage_report_json(vehicle_info, detections):
             "timestamp": datetime.datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
             "version": "5.0",
-            "model": "YOLO11m Car Damage Detector"
+            "model": "YOLOv8m Personalizado"
         },
         "vehicle_info": vehicle_info,
         "damage_summary": {
@@ -183,8 +214,8 @@ def generate_recommendations(detections):
     return recommendations
 
 st.image("https://logodownload.org/wp-content/uploads/2019/11/carglass-logo-0.png", width=250)
-st.title("🛡️ Sistema de Detecção de Danos - YOLO11m")
-st.markdown("**Detecção real de danos com modelo especializado YOLO11m**")
+st.title("🛡️ Sistema de Detecção de Danos - YOLOv8m Personalizado")
+st.markdown("**Detecção de danos com modelo treinado especificamente para seu projeto**")
 
 model, is_damage_model = load_damage_model()
 
@@ -193,10 +224,17 @@ if model is None:
     st.stop()
 
 if is_damage_model:
-    st.success("✅ Modelo YOLO11m especializado carregado!")
-    st.info("🎯 **Classes detectadas:** Amassados, Riscos, Rachaduras, Vidros Quebrados, Lâmpadas Quebradas, Pneus Vazios")
-else:
-    st.warning("⚠️ Usando modelo genérico para demonstração")
+    st.info("🎯 **Modelo:** YOLOv8m treinado com seu dataset personalizado")
+    if hasattr(model, 'names'):
+        st.info(f"📋 **Classes detectadas:** {', '.join(model.names.values())}")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        confidence_threshold = st.slider("Limiar de Confiança", 0.1, 0.9, 0.25, 0.05)
+    with col2:
+        iou_threshold = st.slider("Limiar IoU", 0.1, 0.9, 0.45, 0.05)
+    with col3:
+        st.write("**Configurações de Detecção**")
 
 st.sidebar.header("📋 Informações do Veículo")
 vehicle_plate = st.sidebar.text_input("Placa", "ABC-1234")
@@ -217,9 +255,9 @@ uploaded_file = st.sidebar.file_uploader("Selecione uma imagem do veículo:", ty
 if uploaded_file:
     image = Image.open(uploaded_file)
     
-    st.header("🔍 Análise com YOLO11m")
+    st.header("🔍 Análise com Modelo Personalizado")
     
-    with st.spinner("Analisando danos com modelo especializado..."):
+    with st.spinner("Analisando danos com modelo treinado..."):
         detections, annotated_img = process_damage_detection(image, model, is_damage_model)
     
     col1, col2 = st.columns(2)
@@ -287,11 +325,19 @@ if uploaded_file:
     
     else:
         st.success("✅ Nenhum dano detectado na imagem!")
+        st.info("Isso pode significar que o veículo está em bom estado ou que os danos não são visíveis nesta imagem.")
+        
         report_json = create_damage_report_json(vehicle_info, [])
         st.json(report_json)
 
 else:
     st.info("👆 Aguardando o envio de uma imagem na barra lateral.")
+    
+    st.header("📊 Informações do Modelo")
+    if model and hasattr(model, 'names'):
+        st.write("**Classes que o modelo pode detectar:**")
+        for i, name in model.names.items():
+            st.write(f"- {name.replace('_', ' ').title()}")
 
 st.markdown("---")
-st.markdown("**Carglass - YOLO11m Car Damage Detector** | Modelo Especializado")
+st.markdown("**Carglass - YOLOv8m Personalizado** | Modelo Treinado Especificamente")
