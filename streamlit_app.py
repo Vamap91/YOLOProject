@@ -408,8 +408,13 @@ def main():
             # Processamento
             with st.spinner("🔍 Analisando imagem... Aguarde..."):
                 detections, annotated_img = process_damage_detection(
-                    image_source, model, confidence_threshold
+                    image_source, model, confidence_threshold, is_damage_model
                 )
+                
+                # Aviso se usando simulação
+                if not is_damage_model and detections:
+                    st.warning("⚠️ **Atenção:** Resultados simulados - usando modelo genérico")
+                    st.info("📋 Para detecção real, carregue o modelo personalizado `trained.pt`")
             
             with col2:
                 st.markdown("#### 🎯 Detecções Encontradas")
