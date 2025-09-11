@@ -7,7 +7,6 @@ import torch
 from datetime import datetime
 from ultralytics import YOLO
 import plotly.express as px
-import plotly.graph_objects as go
 import pandas as pd
 
 try:
@@ -60,16 +59,57 @@ DAMAGE_CONFIG = {
     }
 }
 
+def simulate_damage_detection(vehicle_confidence):
+    """Simula detecção de danos quando usando modelo genérico"""
+    simulated_damages = []
+    
+    if vehicle_confidence > 0.5:
+        simulated_damages.append({
+            'damage_id': "SIM_001",
+            'class': 'dent',
+            'class_display': 'Amassado (Simulado)',
+            'confidence': vehicle_confidence * 0.8,
+            'severity': 'Moderado',
+            'location': 'Carroceria',
+            'estimated_cost': np.random.randint(500, 1500),
+            'bbox': {'x1': 100, 'y1': 100, 'x2': 200, 'y2': 200}
+        })
+        
+        if vehicle_confidence > 0.7:
+            simulated_damages.append({
+                'damage_id': "SIM_002",
+                'class': 'scratch',
+                'class_display': 'Risco (Simulado)',
+                'confidence': vehicle_confidence * 0.6,
+                'severity': 'Leve',
+                'location': 'Pintura',
+                'estimated_cost': np.random.randint(200, 600),
+                'bbox': {'x1': 150, 'y1': 150, 'x2': 250, 'y2': 180}
+            })
+    
+    return simulated_damages
+
 @st.cache_resource
 def load_damage_model():
-    """Carrega modelo YOLO com estratégia simples e robusta"""
+    """Carrega modelo YOLO com verificação de classes específicas"""
     
     try:
         if os.path.exists('trained.pt'):
             st.info("🔄 Carregando modelo personalizado...")
             model = YOLO('trained.pt')
-            st.success("✅ Modelo personalizado carregado!")
-            return model, "Modelo Personalizado"
+            
+            class_names = list(model.names.values())
+            damage_classes = ['dent', 'scratch', 'crack', 'shattered_glass', 'broken_lamp', 'flat_tire']
+            
+            has_damage_classes = any(damage_class in class_names for damage_class in damage_classes)
+            
+            if has_damage_classes:
+                st.success("✅ Modelo personalizado de danos carregado!")
+                st.info(f"🎯 Classes detectadas: {', '.join(class_names)}")
+                return model, "Modelo Personalizado (Danos)", True
+            else:
+                st.warning("⚠️ Modelo personalizado não contém classes de danos específicos")
+                st.info(f"📋 Classes encontradas: {', '.join(class_names)}")
     except Exception as e:
         st.warning(f"⚠️ Erro no modelo personalizado: {str(e)}")
     
@@ -77,29 +117,21 @@ def load_damage_model():
         if os.path.exists('yolov8m.pt'):
             st.info("🔄 Carregando YOLOv8m local...")
             model = YOLO('yolov8m.pt')
-            st.success("✅ YOLOv8m local carregado!")
-            return model, "YOLOv8m Local"
+            st.warning("⚠️ Usando YOLOv8m - Detecta objetos gerais, não danos específicos")
+            return model, "YOLOv8m Local (Genérico)", False
     except Exception as e:
         st.warning(f"⚠️ Erro no YOLOv8m local: {str(e)}")
     
     try:
         st.info("🔄 Baixando YOLOv8m da web...")
         model = YOLO('yolov8m')
-        st.success("✅ YOLOv8m web carregado!")
-        return model, "YOLOv8m Web"
-    except Exception as e:
-        st.warning(f"⚠️ Erro no YOLOv8m web: {str(e)}")
-    
-    try:
-        st.info("🔄 Tentando YOLOv8s como fallback...")
-        model = YOLO('yolov8s')
-        st.success("✅ YOLOv8s carregado como fallback!")
-        return model, "YOLOv8s Fallback"
+        st.warning("⚠️ Usando YOLOv8m web - Detecta objetos gerais, não danos específicos")
+        return model, "YOLOv8m Web (Genérico)", False
     except Exception as e:
         st.error(f"❌ Erro crítico: {str(e)}")
-        return None, None
+        return None, None, False
 
-def process_damage_detection(image, model, confidence_threshold=0.25):
+def process_damage_detection(image, model, confidence_threshold=0.25, is_damage_model=True):
     """Processa detecção de danos na imagem"""
     img_array = np.array(image)
     results = model(img_array, conf=confidence_threshold)
@@ -111,6 +143,12 @@ def process_damage_detection(image, model, confidence_threshold=0.25):
             class_name = results[0].names[int(boxes.cls[i])]
             confidence = float(boxes.conf[i])
             bbox = boxes.xyxy[i].cpu().numpy()
+            
+            if not is_damage_model:
+                if class_name.lower() in ['car', 'truck', 'bus', 'vehicle']:
+                    simulated_damages = simulate_damage_detection(confidence)
+                    detections.extend(simulated_damages)
+                continue
             
             severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Leve')
             location = DAMAGE_CONFIG['location_map'].get(class_name, 'Desconhecida')
@@ -232,7 +270,6 @@ def create_charts(detections):
     if not detections:
         return None, None
     
-    # Gráfico de severidade
     severity_counts = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
     for detection in detections:
         severity_counts[detection['severity']] += 1
@@ -252,7 +289,6 @@ def create_charts(detections):
         height=300
     )
     
-    # Gráfico de confiança
     df_confidence = pd.DataFrame(detections)
     df_confidence['confidence_pct'] = df_confidence['confidence'] * 100
     
@@ -284,11 +320,9 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar com configurações
     with st.sidebar:
         st.markdown("### 🔧 Configurações")
         
-        # Upload manual do modelo
         st.markdown("#### 📁 Upload do Modelo (Opcional)")
         uploaded_model = st.file_uploader(
             "Faça upload do modelo .pt", 
@@ -303,7 +337,6 @@ def main():
             st.success(f"✅ {model_name} carregado via upload!")
             st.rerun()
         
-        # Configuração de confiança
         confidence_threshold = st.slider(
             "Limite de Confiança", 
             min_value=0.1, 
@@ -328,33 +361,30 @@ def main():
         - Rachaduras
         """)
         
-        st.markdown("### 💰 Estimativas")
-        st.markdown("""
-        - **Severo**: R$ 1.500 - R$ 3.500
-        - **Moderado**: R$ 500 - R$ 1.500  
-        - **Leve**: R$ 200 - R$ 600
-        """)
-        
-        # Informações do veículo
         st.markdown("### ℹ️ Dados do Veículo")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
         vehicle_model = st.text_input("Modelo", placeholder="Toyota Corolla")
         vehicle_year = st.number_input("Ano", min_value=1990, max_value=2025, value=2020)
         vehicle_color = st.text_input("Cor", placeholder="Branco")
     
-    # Carregamento do modelo
-    model, model_type = load_damage_model()
-    if model is None:
+    model_result = load_damage_model()
+    if model_result is None or len(model_result) != 3:
         st.error("❌ Não foi possível carregar nenhum modelo YOLO!")
-        st.info("💡 **Soluções:**")
-        st.info("1. Faça upload manual do modelo na barra lateral")
-        st.info("2. Verifique sua conexão com a internet")
-        st.info("3. Reinstale: `pip install ultralytics==8.0.196`")
         return
     
-    st.info(f"🤖 **Modelo ativo:** {model_type}")
+    model, model_type, is_damage_model = model_result
     
-    # Interface principal com tabs
+    if model is None:
+        st.error("❌ Não foi possível carregar nenhum modelo YOLO!")
+        return
+    
+    if is_damage_model:
+        st.success(f"🎯 **Modelo ativo:** {model_type} - Detecta danos específicos")
+    else:
+        st.warning(f"⚠️ **Modelo ativo:** {model_type}")
+        st.warning("🔧 **Atenção:** Modelo genérico detecta objetos, não danos específicos")
+        st.info("📋 **Para detecção real de danos:** Faça upload do modelo `trained.pt` personalizado")
+    
     tab1, tab2 = st.tabs(["📷 Análise de Imagem", "📄 Relatório Completo"])
     
     with tab1:
@@ -365,7 +395,6 @@ def main():
             help="Formatos aceitos: PNG, JPG, JPEG (máx. 200MB)"
         )
         
-        # Exemplos de teste
         st.markdown("### 🎯 Ou teste com exemplos:")
         col1, col2, col3 = st.columns(3)
         
@@ -380,7 +409,6 @@ def main():
             if st.button("💥 Exemplo: Vidro", use_container_width=True):
                 example_selected = "examples/3.png"
         
-        # Processamento da imagem
         image_source = None
         image_name = "Imagem"
         
@@ -393,7 +421,6 @@ def main():
             image_name = uploaded_file.name
         
         if image_source is not None:
-            # Redimensiona imagem se muito grande
             max_size = (1024, 1024)
             if image_source.size[0] > max_size[0] or image_source.size[1] > max_size[1]:
                 image_source.thumbnail(max_size, Image.Resampling.LANCZOS)
@@ -405,13 +432,11 @@ def main():
                 st.markdown("#### 📸 Imagem Original")
                 st.image(image_source, caption=image_name, use_column_width=True)
             
-            # Processamento
             with st.spinner("🔍 Analisando imagem... Aguarde..."):
                 detections, annotated_img = process_damage_detection(
                     image_source, model, confidence_threshold, is_damage_model
                 )
                 
-                # Aviso se usando simulação
                 if not is_damage_model and detections:
                     st.warning("⚠️ **Atenção:** Resultados simulados - usando modelo genérico")
                     st.info("📋 Para detecção real, carregue o modelo personalizado `trained.pt`")
@@ -420,11 +445,9 @@ def main():
                 st.markdown("#### 🎯 Detecções Encontradas")
                 st.image(annotated_img, caption="Danos detectados", use_column_width=True)
             
-            # Resultados da análise
             if detections:
                 st.markdown("### 📊 Resultados da Análise")
                 
-                # Métricas principais
                 total_cost = sum([d['estimated_cost'] for d in detections])
                 severity_counts = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
                 for d in detections:
@@ -442,7 +465,6 @@ def main():
                     confidence_avg = np.mean([d['confidence'] for d in detections])
                     st.metric("📈 Confiança Média", f"{confidence_avg:.1%}")
                 
-                # Gráficos
                 st.markdown("### 📈 Análise Visual")
                 fig_severity, fig_confidence = create_charts(detections)
                 
@@ -455,7 +477,6 @@ def main():
                     if fig_confidence:
                         st.plotly_chart(fig_confidence, use_container_width=True)
                 
-                # Tabela detalhada
                 st.markdown("### 📋 Detalhes dos Danos")
                 df_detections = pd.DataFrame(detections)
                 df_display = df_detections[['damage_id', 'class_display', 'severity', 'location', 'estimated_cost']].copy()
@@ -465,7 +486,6 @@ def main():
                 
                 st.dataframe(df_display, use_container_width=True)
                 
-                # Recomendações
                 st.markdown("### 🚨 Recomendações")
                 vehicle_info = {
                     "plate": vehicle_plate or "Não informado",
@@ -486,7 +506,6 @@ def main():
                     else:
                         st.success(f"✅ **{rec['priority']}**: {rec['message']}")
                 
-                # Salva relatório na sessão
                 st.session_state['report'] = report
                 
             else:
@@ -494,7 +513,6 @@ def main():
                 st.markdown("**Parabéns!** Seu veículo parece estar em excelentes condições visuais.")
                 st.balloons()
                 
-                # Relatório vazio para veículos sem danos
                 vehicle_info = {
                     "plate": vehicle_plate or "Não informado",
                     "model": vehicle_model or "Não informado",
@@ -506,7 +524,6 @@ def main():
         else:
             st.info("👆 **Faça upload de uma imagem** ou **selecione um exemplo** para começar a análise")
             
-            # Instruções de uso
             with st.expander("📖 **Como usar este sistema**"):
                 st.markdown("""
                 1. **Upload**: Envie uma foto clara do seu veículo
@@ -528,7 +545,6 @@ def main():
             
             st.markdown("### 📄 Relatório Completo de Inspeção")
             
-            # Cabeçalho do relatório
             col1, col2 = st.columns([2, 1])
             
             with col1:
@@ -546,7 +562,6 @@ def main():
                 st.write(f"**Sistema:** {report['inspection_info']['inspector']}")
                 st.write(f"**Versão:** {report['inspection_info']['version']}")
             
-            # Resumo executivo
             st.markdown("#### 📊 Resumo Executivo")
             summary = report['damage_summary']
             
@@ -561,7 +576,6 @@ def main():
                 severity_critical = summary['severity_count']['Severo']
                 st.metric("Críticos", severity_critical)
             
-            # Detalhes dos danos (se houver)
             if report['detections']:
                 st.markdown("#### 📋 Lista Detalhada de Danos")
                 
@@ -573,7 +587,6 @@ def main():
                 
                 st.dataframe(df_display, use_container_width=True)
             
-            # Recomendações detalhadas
             st.markdown("#### 🎯 Recomendações Detalhadas")
             for i, rec in enumerate(report['recommendations'], 1):
                 with st.expander(f"{i}. {rec['priority']} - {rec['message'][:50]}..."):
@@ -582,7 +595,6 @@ def main():
                     if rec['damages']:
                         st.write(f"**Danos Relacionados:** {', '.join(rec['damages'])}")
             
-            # Download do relatório
             st.markdown("#### 📥 Download do Relatório")
             
             col1, col2 = st.columns(2)
@@ -598,7 +610,6 @@ def main():
                 )
             
             with col2:
-                # Relatório em texto
                 report_text = f"""
 RELATÓRIO DE INSPEÇÃO CARGLASS
 {'='*50}
@@ -656,7 +667,6 @@ Tecnologia: {report['inspection_info']['model']}
             - **Downloads**: Relatórios em JSON e TXT para arquivo
             """)
     
-    # Footer
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 1rem;'>
