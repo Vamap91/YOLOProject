@@ -19,13 +19,37 @@ def load_damage_model():
     if not os.path.exists(model_path):
         st.info("🔄 Baixando modelo personalizado do Google Drive...")
         
-        drive_url = "https://drive.google.com/uc?export=download&id=1ey-QZYRu-SgbT_PF1nXb0ag9V8tOAVU5"
+        # URL corrigida para download direto do Google Drive
+        file_id = "1ey-QZYRu-SgbT_PF1nXb0ag9V8tOAVU5"
+        drive_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
         
         try:
             import requests
             import time
             
-            response = requests.get(drive_url, stream=True)
+            session = requests.Session()
+            
+            # Primeira requisição para pegar o token de confirmação se necessário
+            response = session.get(drive_url, stream=True)
+            
+            # Verifica se precisa de confirmação para arquivos grandes
+            if 'download_warning' in response.text:
+                # Procura pelo token de confirmação
+                for line in response.text.splitlines():
+                    if 'confirm=' in line:
+                        token = line.split('confirm=')[1].split('&')[0].split('"')[0]
+                        drive_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={token}"
+                        break
+                
+                # Nova requisição com token
+                response = session.get(drive_url, stream=True)
+            
+            # Verifica se a resposta é um arquivo válido
+            content_type = response.headers.get('content-type', '')
+            if 'text/html' in content_type:
+                st.error("❌ Google Drive retornou HTML em vez do arquivo")
+                st.info("💡 Tente tornar o arquivo público e verificar as permissões")
+                return None, False
             
             if response.status_code == 200:
                 total_size = int(response.headers.get('content-length', 0))
@@ -52,6 +76,13 @@ def load_damage_model():
                 
                 progress_bar.empty()
                 status_text.empty()
+                
+                # Verifica se o arquivo baixado é válido
+                if os.path.getsize(model_path) < 1024:  # Menor que 1KB provavelmente é HTML
+                    os.remove(model_path)
+                    st.error("❌ Arquivo baixado inválido (muito pequeno)")
+                    return None, False
+                
                 st.success("✅ Modelo baixado com sucesso!")
                 
             else:
@@ -60,8 +91,12 @@ def load_damage_model():
                 
         except Exception as e:
             st.error(f"❌ Erro ao baixar modelo: {e}")
-            st.info("📁 Certifique-se de que tem conexão com internet ou coloque o arquivo 'yolov8m.pt' manualmente na pasta")
-            return None, False
+            st.info("💡 Usando modelo base como fallback")
+            try:
+                model = YOLO('yolov8m.pt')
+                return model, False
+            except:
+                return None, False      return None, False
     
     try:
         # Primeiro tenta carregar normalmente
