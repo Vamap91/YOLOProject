@@ -132,7 +132,7 @@ def create_confidence_chart(detections):
         showlegend=False
     )
     
-    fig.update_yaxis(tickformat='.1%')
+    fig.update_layout(yaxis=dict(tickformat='.1%'))
     
     return fig
 
