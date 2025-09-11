@@ -64,12 +64,43 @@ def load_damage_model():
             return None, False
     
     try:
+        # Primeiro tenta carregar normalmente
         model = YOLO(model_path)
         st.success("✅ Modelo YOLOv8m personalizado carregado!")
         return model, True
     except Exception as e:
-        st.error(f"❌ Erro ao carregar modelo: {e}")
-        return None, False
+        st.warning(f"Falha no carregamento padrão: {str(e)[:100]}...")
+        
+        # Tentativa com patch do PyTorch
+        try:
+            st.info("🔄 Tentando carregamento com patch PyTorch...")
+            import torch
+            
+            # Patch temporário para compatibilidade
+            original_load = torch.load
+            def patched_load(*args, **kwargs):
+                kwargs['weights_only'] = False
+                return original_load(*args, **kwargs)
+            
+            torch.load = patched_load
+            model = YOLO(model_path)
+            torch.load = original_load  # Restaura função original
+            
+            st.success("✅ Modelo carregado com patch de compatibilidade!")
+            return model, True
+            
+        except Exception as e2:
+            st.warning(f"Falha no patch: {str(e2)[:100]}...")
+            
+            # Fallback para modelo base
+            try:
+                st.info("🔄 Carregando modelo base YOLOv8m...")
+                model = YOLO('yolov8m.pt')
+                st.warning("⚠️ Usando modelo genérico YOLOv8m (não personalizado)")
+                return model, False
+            except Exception as e3:
+                st.error(f"❌ Falha total no carregamento: {e3}")
+                return None, False
 
 def process_damage_detection(image, model, is_damage_model):
     results = model(image, conf=0.25, iou=0.45)
