@@ -96,7 +96,7 @@ def load_damage_model():
                 model = YOLO('yolov8m.pt')
                 return model, False
             except:
-                return None, False      return None, False
+                return None, False
     
     try:
         # Primeiro tenta carregar normalmente
