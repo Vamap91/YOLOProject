@@ -7,7 +7,6 @@ from datetime import datetime
 import plotly.express as px
 import pandas as pd
 
-# IMPORTAÇÃO LIMPA - SEM PATCH
 from ultralytics import YOLO
 
 try:
@@ -133,21 +132,18 @@ def create_confidence_chart(detections):
         showlegend=False
     )
     
-    fig.update_yaxis(tickformat='.0%')
+    fig.update_yaxis(tickformat='.1%')
     
     return fig
 
 def simulate_damage_analysis(detections):
-    """Simula análise de danos baseada nos objetos detectados"""
     simulated_damages = []
     
-    # Se detectou carro, simula alguns danos
     car_detected = any(d['class'].lower() in ['car', 'truck', 'bus'] for d in detections)
     
     if car_detected:
         max_confidence = max([d['confidence'] for d in detections if d['class'].lower() in ['car', 'truck', 'bus']])
         
-        # Simula amassado com base na confiança do carro
         if max_confidence > 0.5:
             simulated_damages.append({
                 'damage_id': "SIM_001",
@@ -160,7 +156,6 @@ def simulate_damage_analysis(detections):
                 'bbox': {'x1': 100, 'y1': 100, 'x2': 200, 'y2': 200}
             })
         
-        # Simula riscos se confiança muito alta
         if max_confidence > 0.7:
             simulated_damages.append({
                 'damage_id': "SIM_002",
@@ -297,7 +292,6 @@ def main():
             else:
                 st.info("Nenhum objeto detectado para exibir no gráfico.")
         
-        # Análise simulada de danos
         simulated_damages = simulate_damage_analysis(detections)
         
         if simulated_damages:
@@ -315,7 +309,6 @@ def main():
                 avg_conf = np.mean([d['confidence'] for d in simulated_damages])
                 st.metric("📈 Confiança Média", f"{avg_conf:.1%}")
             
-            # Tabela de danos simulados
             df_damages = pd.DataFrame(simulated_damages)
             df_display = df_damages[['damage_id', 'class_display', 'severity', 'estimated_cost']].copy()
             df_display['estimated_cost'] = df_display['estimated_cost'].apply(lambda x: f"R$ {x:,.2f}")
@@ -324,7 +317,6 @@ def main():
             
             st.dataframe(df_display, use_container_width=True)
         
-        # Relatório completo
         if detections:
             st.header("📄 Relatório Completo")
             
@@ -337,7 +329,6 @@ def main():
             
             report = create_damage_report_json(detections, simulated_damages, vehicle_info)
             
-            # Download do relatório
             report_json = json.dumps(report, indent=2, ensure_ascii=False)
             st.download_button(
                 label="📄 Baixar Relatório JSON",
@@ -346,7 +337,6 @@ def main():
                 mime="application/json"
             )
             
-            # Resumo do relatório
             with st.expander("📋 Resumo do Relatório"):
                 st.write(f"**Objetos detectados**: {len(detections)}")
                 st.write(f"**Danos simulados**: {len(simulated_damages)}")
