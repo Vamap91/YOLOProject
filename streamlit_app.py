@@ -1,4 +1,3 @@
-
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -8,6 +7,8 @@ from datetime import datetime
 import plotly.express as px
 import pandas as pd
 from ultralytics import YOLO
+import requests
+from pathlib import Path
 
 try:
     import cv2
@@ -54,13 +55,64 @@ DAMAGE_CONFIG = {
     }
 }
 
+def download_model_from_release():
+    """Baixa o modelo do GitHub Releases se não existir localmente."""
+    model_path = "car_damage_best.pt"
+    
+    if not os.path.exists(model_path):
+        st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
+        
+        # SUBSTITUA ESTA URL pela URL do seu GitHub Release
+        # Formato: https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/TAG/car_damage_best.pt
+        model_url = "https://github.com/SEU_USUARIO/SEU_REPO/releases/download/v1.0.0/car_damage_best.pt"
+        
+        try:
+            response = requests.get(model_url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with open(model_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = downloaded / total_size
+                            progress_bar.progress(progress)
+                            status_text.text(f"Baixando: {downloaded / 1024 / 1024:.1f}MB / {total_size / 1024 / 1024:.1f}MB")
+            
+            progress_bar.empty()
+            status_text.empty()
+            st.success("✅ Modelo baixado com sucesso!")
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ Erro ao baixar o modelo: {e}")
+            st.error("Verifique se a URL do modelo está correta no código.")
+            return None
+        except Exception as e:
+            st.error(f"❌ Erro inesperado: {e}")
+            return None
+    
+    return model_path
+
 @st.cache_resource
 def load_model():
     """Carrega o modelo YOLOv8 treinado para detecção de danos."""
-    model_path = 'car_damage_best.pt'
-    if not os.path.exists(model_path):
-        st.error(f"Modelo '{model_path}' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
+    
+    # Primeiro, tenta baixar o modelo se necessário
+    model_path = download_model_from_release()
+    
+    if model_path is None:
         return None
+        
+    if not os.path.exists(model_path):
+        st.error(f"Modelo '{model_path}' não encontrado após o download.")
+        return None
+        
     try:
         model = YOLO(model_path)
         return model
@@ -212,6 +264,10 @@ def main():
         3. Estimativa de custo de reparo.
         4. Geração de relatório detalhado.
         """)
+        
+        st.header("⚙️ Configuração do Modelo")
+        st.info("🔗 **Importante**: Para usar este sistema, você precisa configurar a URL do modelo no código. Veja o arquivo GUIA_DEPLOY_MODELO_GRANDE.md")
+        
         st.header("Informações do Veículo (Opcional)")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
         vehicle_model = st.text_input("Modelo", placeholder="Ex: Toyota Corolla")
@@ -220,7 +276,11 @@ def main():
 
     model = load_model()
     if model is None:
+        st.error("❌ Não foi possível carregar o modelo. Verifique a configuração.")
+        st.info("💡 **Dica**: Se você está executando pela primeira vez, certifique-se de que a URL do modelo está configurada corretamente no código.")
         return
+
+    st.success("✅ Modelo carregado com sucesso!")
 
     st.header("1. Upload da Imagem do Veículo")
     uploaded_file = st.file_uploader(
@@ -256,7 +316,7 @@ def main():
             c1, c2, c3 = st.columns(3)
             c1.metric("🔍 Total de Danos", len(damage_analysis))
             c2.metric("💰 Custo Total Estimado", f"R$ {total_cost:,.2f}")
-            c3.metric("Urência de Reparo", urgency)
+            c3.metric("⚠️ Urgência de Reparo", urgency)
 
             st.markdown("### Resumo dos Danos")
             summary = create_detection_summary(detections)
