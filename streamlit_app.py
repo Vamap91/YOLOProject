@@ -23,62 +23,59 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Configuração para o modelo público
+# Configuração para o modelo do Hugging Face
 DAMAGE_CONFIG = {
     'severity_map': {
-        # Classes típicas de modelos de dano veicular
-        'dent': 'Moderado',
-        'scratch': 'Leve',
-        'crack': 'Leve',
-        'damage': 'Moderado',
-        'broken': 'Severo',
-        'shattered': 'Severo',
-        'flat': 'Severo',
-        'minor_damage': 'Leve',
-        'major_damage': 'Severo',
-        'moderate_damage': 'Moderado',
-        # Adicionar mais conforme necessário
+        # Classes do modelo Hugging Face (Light, Moderate, Severe)
+        'Light': 'Leve',
+        'Moderate': 'Moderado', 
+        'Severe': 'Severo',
+        # Variações possíveis
+        'light': 'Leve',
+        'moderate': 'Moderado',
+        'severe': 'Severo',
+        '0': 'Leve',      # Caso use índices
+        '1': 'Moderado',
+        '2': 'Severo',
     },
     'location_map': {
-        'dent': 'Carroceria',
-        'scratch': 'Pintura',
-        'crack': 'Para-choque/Plásticos',
-        'damage': 'Carroceria',
-        'broken': 'Componentes',
-        'shattered': 'Vidros',
-        'flat': 'Pneus',
-        'minor_damage': 'Superficial',
-        'major_damage': 'Estrutural',
-        'moderate_damage': 'Carroceria',
+        'Light': 'Superficial',
+        'Moderate': 'Carroceria',
+        'Severe': 'Estrutural',
+        'light': 'Superficial',
+        'moderate': 'Carroceria',
+        'severe': 'Estrutural',
+        '0': 'Superficial',
+        '1': 'Carroceria',
+        '2': 'Estrutural',
     },
     'cost_ranges': {
-        'Severo': (1500, 3500),
-        'Moderado': (500, 1500),
-        'Leve': (200, 600)
+        'Severo': (2000, 5000),
+        'Moderado': (800, 2000),
+        'Leve': (300, 800)
     },
     'class_names': {
-        'dent': 'Amassado',
-        'scratch': 'Risco',
-        'crack': 'Rachadura',
-        'damage': 'Dano Geral',
-        'broken': 'Quebrado',
-        'shattered': 'Estilhaçado',
-        'flat': 'Pneu Vazio',
-        'minor_damage': 'Dano Menor',
-        'major_damage': 'Dano Maior',
-        'moderate_damage': 'Dano Moderado',
+        'Light': 'Dano Leve',
+        'Moderate': 'Dano Moderado',
+        'Severe': 'Dano Severo',
+        'light': 'Dano Leve',
+        'moderate': 'Dano Moderado',
+        'severe': 'Dano Severo',
+        '0': 'Dano Leve',
+        '1': 'Dano Moderado',
+        '2': 'Dano Severo',
     }
 }
 
-def download_public_model():
-    """Baixa o modelo público do GitHub se não existir localmente."""
-    model_path = "trained_public.pt"
+def download_huggingface_model():
+    """Baixa o modelo do Hugging Face se não existir localmente."""
+    model_path = "car-damage-hf.pt"
     
     if not os.path.exists(model_path):
-        st.info("🔄 Baixando modelo público... (primeira execução, pode levar alguns minutos)")
+        st.info("🔄 Baixando modelo do Hugging Face... (primeira execução, pode levar alguns minutos)")
         
-        # URL do modelo público do GitHub
-        model_url = "https://raw.githubusercontent.com/NabilNawa/YOLOv8-Vehicle-Damage-Detector/refs/heads/main/trained.pt"
+        # URL do modelo do Hugging Face
+        model_url = "https://huggingface.co/nezahatkorkmaz/car-damage-level-detection-yolov8/resolve/main/car-damage.pt"
         
         try:
             response = requests.get(model_url, stream=True)
@@ -101,10 +98,10 @@ def download_public_model():
             
             progress_bar.empty()
             status_text.empty()
-            st.success("✅ Modelo público baixado com sucesso!")
+            st.success("✅ Modelo do Hugging Face baixado com sucesso!")
             
         except requests.exceptions.RequestException as e:
-            st.error(f"❌ Erro ao baixar o modelo público: {e}")
+            st.error(f"❌ Erro ao baixar o modelo do Hugging Face: {e}")
             return None
         except Exception as e:
             st.error(f"❌ Erro inesperado: {e}")
@@ -155,12 +152,12 @@ def download_custom_model():
     return model_path
 
 @st.cache_resource
-def load_model(model_choice="public"):
+def load_model(model_choice="huggingface"):
     """Carrega o modelo YOLOv8 escolhido."""
     
-    if model_choice == "public":
-        model_path = download_public_model()
-        model_name = "Público (GitHub - NabilNawa)"
+    if model_choice == "huggingface":
+        model_path = download_huggingface_model()
+        model_name = "Hugging Face (nezahatkorkmaz)"
     elif model_choice == "custom":
         model_path = download_custom_model()
         model_name = "Customizado (car_damage_best.pt)"
@@ -239,7 +236,7 @@ def create_damage_analysis(detections):
         severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')  # Default para Moderado
         location = DAMAGE_CONFIG['location_map'].get(class_name, 'Carroceria')  # Default para Carroceria
         
-        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (300, 800))
+        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (500, 1500))
         estimated_cost = int(np.random.randint(cost_range[0], cost_range[1]))
         
         damage_report.append({
@@ -284,8 +281,8 @@ def create_confidence_chart(damage_analysis):
         df, 
         x='class_display', 
         y='confidence',
-        title='Confiança das Detecções por Tipo de Dano',
-        labels={'confidence': 'Confiança (%)', 'class_display': 'Tipo de Dano'},
+        title='Confiança das Detecções por Nível de Dano',
+        labels={'confidence': 'Confiança (%)', 'class_display': 'Nível de Dano'},
         color='confidence',
         color_continuous_scale='RdYlGn',
         text='confidence'
@@ -318,7 +315,7 @@ def create_damage_report_json(damage_analysis, vehicle_info, model_name):
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
-            "version": "2.2",
+            "version": "2.3",
             "model": f"YOLOv8 ({model_name})",
         },
         "vehicle_info": vehicle_info,
@@ -348,14 +345,14 @@ def main():
         # Seleção do modelo
         model_choice = st.selectbox(
             "Escolha o Modelo:",
-            options=["public", "custom", "generic"],
+            options=["huggingface", "custom", "generic"],
             format_func=lambda x: {
-                "public": "🌟 Público (GitHub - Recomendado)",
+                "huggingface": "🤗 Hugging Face (Recomendado)",
                 "custom": "🔧 Customizado (Seu modelo)",
                 "generic": "⚡ Genérico (YOLOv8n)"
             }[x],
             index=0,
-            help="Modelo público é treinado especificamente para danos veiculares"
+            help="Modelo do Hugging Face é especializado em níveis de dano"
         )
         
         # Threshold de confiança
@@ -363,20 +360,20 @@ def main():
             "Threshold de Confiança", 
             min_value=0.1, 
             max_value=0.9, 
-            value=0.5, 
+            value=0.4, 
             step=0.1,
             help="Detecções com confiança abaixo deste valor serão ignoradas"
         )
         
         st.header("Sobre o Sistema")
         st.markdown("""
-        **Versão 2.2 - Modelo Público**
+        **Versão 2.3 - Hugging Face**
         
         **Novidades:**
-        - 🌟 Modelo público especializado
+        - 🤗 Modelo do Hugging Face
+        - 📊 Classificação por níveis
         - 🔄 Comparação entre modelos
-        - ⚙️ Threshold ajustável
-        - 📊 Análise detalhada
+        - ⚙️ Threshold otimizado
         """)
         
         st.header("Informações do Veículo (Opcional)")
@@ -398,19 +395,10 @@ def main():
         st.write(f"**Threshold de Confiança**: {confidence_threshold:.1%}")
         st.write("**Classes detectáveis:**")
         
-        col1, col2 = st.columns(2)
-        classes_list = list(model.names.values())
-        mid_point = len(classes_list) // 2
-        
-        with col1:
-            for class_name in classes_list[:mid_point]:
-                severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')
-                st.write(f"• {class_name} ({severity})")
-        
-        with col2:
-            for class_name in classes_list[mid_point:]:
-                severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')
-                st.write(f"• {class_name} ({severity})")
+        for class_id, class_name in model.names.items():
+            severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')
+            display_name = DAMAGE_CONFIG['class_names'].get(class_name, class_name)
+            st.write(f"• **{class_name}** → {display_name} ({severity})")
 
     st.header("1. Upload da Imagem do Veículo")
     uploaded_file = st.file_uploader(
@@ -462,7 +450,7 @@ def main():
             df_display = pd.DataFrame(damage_analysis)[['class_display', 'severity', 'confidence', 'estimated_cost']]
             df_display['confidence'] = df_display['confidence'].apply(lambda x: f"{x:.1%}")
             df_display['estimated_cost'] = df_display['estimated_cost'].apply(lambda x: f"R$ {x:,.2f}")
-            df_display.columns = ['Tipo de Dano', 'Severidade', 'Confiança', 'Custo Estimado']
+            df_display.columns = ['Nível de Dano', 'Severidade', 'Confiança', 'Custo Estimado']
             st.dataframe(df_display, use_container_width=True)
 
             st.markdown("### Gráfico de Confiança")
@@ -496,12 +484,12 @@ def main():
             st.markdown("""
             **Para obter melhores detecções:**
             
-            1. **Modelo Recomendado**: Use o modelo público (já selecionado)
-            2. **Qualidade da imagem**: Use fotos nítidas e bem iluminadas
-            3. **Ângulo**: Fotografe o veículo de frente ou lateral
-            4. **Distância**: Mantenha uma distância adequada
-            5. **Threshold**: Comece com 50% e ajuste conforme necessário
-            6. **Comparação**: Teste diferentes modelos para comparar resultados
+            1. **Modelo Recomendado**: Use o modelo do Hugging Face (já selecionado)
+            2. **Threshold**: Comece com 40% para detectar mais danos
+            3. **Qualidade da imagem**: Use fotos nítidas e bem iluminadas
+            4. **Ângulo**: Fotografe áreas danificadas de forma clara
+            5. **Comparação**: Teste diferentes modelos para comparar
+            6. **Níveis**: O modelo classifica em Leve, Moderado e Severo
             """)
 
     st.markdown("---")
