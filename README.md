@@ -1,160 +1,104 @@
-# 🚗 Detector de Danos Veiculares - Streamlit App
+# 🚗 Detector de Danos Veiculares - Versão 2.0
 
-Uma aplicação web interativa que utiliza YOLO11m para detectar automaticamente danos em veículos através de imagens.
+Esta é uma aplicação web interativa, construída com Streamlit, que utiliza um modelo de Inteligência Artificial (YOLOv8) para detectar, classificar e analisar danos em veículos a partir de imagens. O sistema foi aprimorado para utilizar um modelo especializado, garantindo uma análise precisa e em tempo real.
 
-## 🎯 Funcionalidades
+## 🎯 Funcionalidades Principais
 
-- **Upload de imagens** de veículos
-- **Detecção automática** de 6 tipos de danos:
-  - Amassados (Dents)
-  - Riscos (Scratches)
-  - Rachaduras (Cracks)
-  - Vidros quebrados (Shattered Glass)
-  - Lâmpadas quebradas (Broken Lamps)
-  - Pneus vazios (Flat Tires)
-- **Visualização interativa** com bounding boxes
-- **Relatório detalhado** com níveis de confiança
-- **Gráficos** de análise das detecções
-- **Recomendações** baseadas nos danos encontrados
+- **Upload de Imagens**: Interface simples para enviar imagens de veículos (JPG, PNG, JPEG).
+- **Detecção Precisa de Danos**: Utiliza o modelo `car_damage_best.pt` para identificar 6 tipos de danos:
+  - Amassados (`dent`)
+  - Riscos (`scratch`)
+  - Rachaduras (`crack`)
+  - Vidros quebrados (`shattered_glass`)
+  - Faróis/lanternas quebradas (`broken_lamp`)
+  - Pneus vazios (`flat_tire`)
+- **Análise Detalhada**: Cada dano detectado é analisado para determinar:
+  - **Severidade**: Leve, Moderado ou Severo.
+  - **Localização**: Carroceria, Pintura, Vidros, etc.
+  - **Custo Estimado**: Uma faixa de valor para o reparo.
+- **Visualização Interativa**: Exibe a imagem original ao lado da imagem com os danos destacados (bounding boxes).
+- **Relatórios Completos**: Gera e permite o download de um relatório detalhado em formato JSON, contendo todas as informações da análise.
+- **Dashboard de Resultados**: Apresenta métricas-chave como número de danos, custo total estimado e gráficos de confiança.
 
-## 🚀 Como Executar
+## 🚀 Como Executar Localmente
 
-### 1. Clone o Repositório
+Siga os passos abaixo para rodar a aplicação em seu ambiente de desenvolvimento.
+
+### 1. Pré-requisitos
+
+- Python 3.9 ou superior
+- `pip` (gerenciador de pacotes)
+
+### 2. Clone o Repositório
+
 ```bash
-git clone https://github.com/seu-usuario/vehicle-damage-detector-streamlit.git
-cd vehicle-damage-detector-streamlit
+# (Opcional) Se você for clonar de um repositório Git
+git clone <URL_DO_SEU_REPOSITORIO>
+cd <NOME_DO_DIRETORIO>
 ```
 
-### 2. Instale as Dependências
+### 3. Instale as Dependências
+
+Certifique-se de que o arquivo `requirements.txt` está no diretório do projeto e execute:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Baixe o Modelo Treinado
-- Faça download do arquivo `trained.pt` 
-- Coloque na raiz do projeto
+### 4. Verifique o Modelo
 
-### 4. Execute a Aplicação
+O modelo treinado `car_damage_best.pt` deve estar na raiz do projeto. Este arquivo é essencial para a detecção de danos.
+
+### 5. Execute a Aplicação Streamlit
+
+No seu terminal, execute o comando:
+
 ```bash
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 
-### 5. Acesse no Navegador
-A aplicação estará disponível em: `http://localhost:8501`
+A aplicação será iniciada e um endereço local (geralmente `http://localhost:8501`) será exibido. Abra-o em seu navegador.
 
 ## 📦 Estrutura do Projeto
 
 ```
-vehicle-damage-detector-streamlit/
+/YOLOProject-main
 │
-├── app.py                 # Aplicação principal Streamlit
-├── requirements.txt       # Dependências Python
-├── trained.pt            # Modelo YOLO treinado
-├── README.md             # Este arquivo
-└── examples/             # Imagens de exemplo
-    ├── dent_example.jpg
-    ├── scratch_example.jpg
-    └── glass_example.jpg
+├── .streamlit/
+│   └── config.toml        # Configurações de tema e servidor do Streamlit
+│
+├── streamlit_app.py       # Código principal da aplicação Streamlit
+├── car_damage_best.pt     # Modelo de IA treinado para detecção de danos
+├── requirements.txt       # Dependências Python do projeto
+├── test_model.py          # Script para validar o modelo e o ambiente
+└── README.md              # Este arquivo de documentação
 ```
-
-## 🎮 Como Usar
-
-1. **Abra a aplicação** no navegador
-2. **Faça upload** de uma imagem de um veículo
-3. **Aguarde** a análise automática
-4. **Visualize** os resultados:
-   - Imagem original vs imagem com detecções
-   - Resumo dos danos encontrados
-   - Gráfico de confiança das detecções
-   - Tabela detalhada
-   - Recomendações de reparo
-
-## 📊 Performance do Modelo
-
-| Tipo de Dano | mAP50 | Precisão |
-|--------------|--------|----------|
-| Vidros quebrados | 99.4% | Excelente |
-| Pneus vazios | 95.9% | Excelente |
-| Lâmpadas quebradas | 89.5% | Muito boa |
-| Riscos | 90.5% | Muito boa |
-| Amassados | 69.2% | Boa |
-| Rachaduras | 62.0% | Moderada |
 
 ## 🛠️ Tecnologias Utilizadas
 
-- **Streamlit** - Framework web para apps de ML
-- **YOLO11m** - Modelo de detecção de objetos
-- **OpenCV** - Processamento de imagens
-- **Plotly** - Visualizações interativas
-- **Pandas** - Manipulação de dados
-- **PyTorch** - Framework de deep learning
+- **Backend**: Python 3.11
+- **Inteligência Artificial**: Ultralytics YOLOv8, PyTorch
+- **Processamento de Imagem**: OpenCV, Pillow
+- **Frontend**: Streamlit
+- **Visualização de Dados**: Plotly, Pandas
 
-## 🌐 Deploy
+## 🌐 Deploy na Streamlit Cloud
 
-### Streamlit Cloud
-1. Fork este repositório
-2. Conecte sua conta GitHub ao Streamlit Cloud
-3. Deploy direto da interface web
+Para fazer o deploy desta aplicação, siga estes passos:
 
-### Heroku
-```bash
-# Adicione arquivos de config do Heroku
-echo "web: streamlit run app.py --server.port \$PORT" > Procfile
-echo "python-3.9.0" > runtime.txt
+1.  **Envie o projeto para o GitHub**: Certifique-se de que todos os arquivos, incluindo `car_damage_best.pt`, `streamlit_app.py`, `requirements.txt` e `packages.txt` (se necessário), estejam no seu repositório.
+    *   **Atenção**: O GitHub tem um limite de 100MB por arquivo. Se o seu modelo `.pt` for maior, use o Git LFS (Large File Storage).
+2.  **Conecte sua conta Streamlit Cloud ao GitHub**.
+3.  **Crie um novo aplicativo**: No dashboard do Streamlit Cloud, clique em "New app" e selecione o repositório correspondente.
+4.  **Configure e faça o deploy**: Verifique se o arquivo principal (`streamlit_app.py`) está correto e clique em "Deploy!".
 
-# Deploy
-heroku create seu-app-name
-git push heroku main
-```
+## 🔮 Próximos Passos e Melhorias
 
-### Docker
-```dockerfile
-FROM python:3.9-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8501
-
-CMD ["streamlit", "run", "app.py"]
-```
-
-## 🤝 Contribuições
-
-1. Fork o projeto
-2. Crie uma branch (`git checkout -b feature/nova-funcionalidade`)
-3. Commit suas mudanças (`git commit -am 'Adiciona nova funcionalidade'`)
-4. Push para a branch (`git push origin feature/nova-funcionalidade`)
-5. Abra um Pull Request
-
-## 📄 Casos de Uso
-
-- **Concessionárias**: Inspeção pré-entrega e pós-serviço
-- **Seguradoras**: Avaliação automática de sinistros
-- **Locadoras**: Check-in/out automatizado
-- **Frotas**: Auditoria regular de veículos
-- **Consumidores**: Avaliação de veículos usados
-
-## 🔮 Melhorias Futuras
-
-- [ ] Suporte a múltiplas imagens
-- [ ] Exportação de relatórios em PDF
-- [ ] Integração com APIs de seguradoras
-- [ ] Modo batch para análise em lote
-- [ ] Estimativa de custos de reparo
-- [ ] Histórico de análises por usuário
-- [ ] API REST para integração externa
-
-## 📝 Licença
-
-MIT License - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## 🙋‍♂️ Suporte
-
-Tem dúvidas? Abra uma [issue](https://github.com/seu-usuario/vehicle-damage-detector-streamlit/issues) ou entre em contato!
+- [ ] Otimizar a velocidade de inferência para análises mais rápidas.
+- [ ] Implementar suporte para análise de vídeos.
+- [ ] Adicionar um sistema de histórico para salvar e consultar análises passadas.
+- [ ] Criar uma API REST para permitir a integração do modelo com outros sistemas.
 
 ---
 
-**⭐ Se este projeto foi útil, dê uma estrela no GitHub!**
+*Este projeto foi aprimorado para fornecer uma solução robusta e precisa para a inspeção de danos veiculares, substituindo a análise simulada por detecções reais e especializadas.*
