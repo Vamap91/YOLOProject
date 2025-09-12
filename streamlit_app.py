@@ -62,9 +62,8 @@ def download_model_from_release():
     if not os.path.exists(model_path):
         st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        # SUBSTITUA ESTA URL pela URL do seu GitHub Release
-        # Formato: https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/TAG/car_damage_best.pt
-        model_url = "https://github.com/SEU_USUARIO/SEU_REPO/releases/download/v1.0.0/car_damage_best.pt"
+        # URL do seu GitHub Release v2.0.0
+        model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
         
         try:
             response = requests.get(model_url, stream=True)
@@ -91,7 +90,7 @@ def download_model_from_release():
             
         except requests.exceptions.RequestException as e:
             st.error(f"❌ Erro ao baixar o modelo: {e}")
-            st.error("Verifique se a URL do modelo está correta no código.")
+            st.error("Verifique se o modelo foi enviado para o GitHub Releases v2.0.0")
             return None
         except Exception as e:
             st.error(f"❌ Erro inesperado: {e}")
@@ -265,9 +264,6 @@ def main():
         4. Geração de relatório detalhado.
         """)
         
-        st.header("⚙️ Configuração do Modelo")
-        st.info("🔗 **Importante**: Para usar este sistema, você precisa configurar a URL do modelo no código. Veja o arquivo GUIA_DEPLOY_MODELO_GRANDE.md")
-        
         st.header("Informações do Veículo (Opcional)")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
         vehicle_model = st.text_input("Modelo", placeholder="Ex: Toyota Corolla")
@@ -276,8 +272,7 @@ def main():
 
     model = load_model()
     if model is None:
-        st.error("❌ Não foi possível carregar o modelo. Verifique a configuração.")
-        st.info("💡 **Dica**: Se você está executando pela primeira vez, certifique-se de que a URL do modelo está configurada corretamente no código.")
+        st.error("❌ Não foi possível carregar o modelo. Verifique se o modelo foi enviado para o GitHub Releases v2.0.0")
         return
 
     st.success("✅ Modelo carregado com sucesso!")
