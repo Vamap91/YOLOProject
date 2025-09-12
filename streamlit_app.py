@@ -7,8 +7,14 @@ from datetime import datetime
 import plotly.express as px
 import pandas as pd
 import requests
-import base64
 from io import BytesIO
+
+# Importações condicionais
+try:
+    from transformers import AutoImageProcessor, AutoModelForImageClassification, pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
 
 try:
     from ultralytics import YOLO
@@ -21,6 +27,12 @@ try:
 except ImportError:
     cv2 = None
 
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
 st.set_page_config(
     page_title="Carglass - Detector de Danos Veiculares",
     page_icon="🚗",
@@ -28,22 +40,32 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Configuração para o modelo via API
+# Configuração universal para diferentes modelos
 DAMAGE_CONFIG = {
     'class_mapping': {
+        # Modelo Transformer
         "LABEL_0": "Crack",
         "LABEL_1": "Scratch", 
         "LABEL_2": "Tire Flat",
         "LABEL_3": "Dent",
         "LABEL_4": "Glass Shatter",
         "LABEL_5": "Lamp Broken",
-        # Variações possíveis
         "Crack": "Crack",
         "Scratch": "Scratch",
         "Tire Flat": "Tire Flat",
         "Dent": "Dent", 
         "Glass Shatter": "Glass Shatter",
-        "Lamp Broken": "Lamp Broken"
+        "Lamp Broken": "Lamp Broken",
+        # Modelo YOLO customizado
+        'dent': 'Dent',
+        'scratch': 'Scratch',
+        'crack': 'Crack',
+        'bonnet-dent': 'Dent',
+        'door-dent': 'Dent',
+        'bumper-dent': 'Dent',
+        'shattered_glass': 'Glass Shatter',
+        'broken_lamp': 'Lamp Broken',
+        'flat_tire': 'Tire Flat',
     },
     'severity_map': {
         "Crack": 'Leve',
@@ -76,88 +98,91 @@ DAMAGE_CONFIG = {
     }
 }
 
-def download_custom_model():
-    """Baixa o modelo customizado como fallback."""
-    model_path = "car_damage_best.pt"
+@st.cache_resource
+def load_transformer_pipeline():
+    """Carrega o pipeline do Transformers."""
+    if not TRANSFORMERS_AVAILABLE:
+        return None
     
-    if not os.path.exists(model_path):
-        st.info("🔄 Baixando modelo customizado...")
-        
-        model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
-        
-        try:
-            response = requests.get(model_url, stream=True)
-            response.raise_for_status()
-            
-            total_size = int(response.headers.get('content-length', 0))
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            with open(model_path, 'wb') as f:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            progress = downloaded / total_size
-                            progress_bar.progress(progress)
-                            status_text.text(f"Baixando: {downloaded / 1024 / 1024:.1f}MB / {total_size / 1024 / 1024:.1f}MB")
-            
-            progress_bar.empty()
-            status_text.empty()
-            st.success("✅ Modelo customizado baixado!")
-            
-        except Exception as e:
-            st.error(f"❌ Erro ao baixar modelo customizado: {e}")
-            return None
-    
-    return model_path
+    try:
+        model_name = "beingamit99/car_damage_detection"
+        pipe = pipeline("image-classification", model=model_name)
+        return pipe
+    except Exception as e:
+        st.warning(f"Erro ao carregar Transformers: {e}")
+        return None
 
 @st.cache_resource
 def load_yolo_model():
-    """Carrega modelo YOLO como fallback."""
+    """Carrega modelo YOLO."""
     if not YOLO_AVAILABLE:
         return None, None
     
     try:
-        # Tentar carregar modelo customizado primeiro
-        model_path = download_custom_model()
-        if model_path and os.path.exists(model_path):
+        # Tentar carregar modelo customizado
+        model_path = "car_damage_best.pt"
+        if not os.path.exists(model_path):
+            # Baixar modelo customizado
+            model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
+            try:
+                response = requests.get(model_url, stream=True)
+                response.raise_for_status()
+                
+                with open(model_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                
+                model = YOLO(model_path)
+                return model, "Customizado (car_damage_best.pt)"
+            except:
+                pass
+        else:
             model = YOLO(model_path)
             return model, "Customizado (car_damage_best.pt)"
-        else:
-            # Fallback para modelo genérico
-            model = YOLO('yolov8n.pt')
-            return model, "Genérico (YOLOv8n)"
+        
+        # Fallback para modelo genérico
+        model = YOLO('yolov8n.pt')
+        return model, "Genérico (YOLOv8n)"
+        
     except Exception as e:
-        st.error(f"Erro ao carregar YOLO: {e}")
+        st.warning(f"Erro ao carregar YOLO: {e}")
         return None, None
 
-def image_to_base64(image):
-    """Converte imagem PIL para base64."""
+def predict_with_transformer(image, pipe, confidence_threshold=0.3):
+    """Predição com Transformers."""
     try:
-        buffer = BytesIO()
-        image.save(buffer, format="JPEG")
-        img_str = base64.b64encode(buffer.getvalue()).decode()
-        return img_str
+        results = pipe(image)
+        
+        detections = []
+        for result in results:
+            if result['score'] >= confidence_threshold:
+                class_name = result['label']
+                mapped_name = DAMAGE_CONFIG['class_mapping'].get(class_name, class_name)
+                
+                detection = {
+                    'class': mapped_name,
+                    'confidence': float(result['score']),
+                    'bbox': [0, 0, image.width, image.height]
+                }
+                detections.append(detection)
+        
+        return detections, "Transformers Local"
+        
     except Exception as e:
-        st.error(f"Erro ao converter imagem: {e}")
-        return None
+        st.error(f"Erro na predição Transformers: {e}")
+        return [], "Transformers (Erro)"
 
-def predict_with_huggingface_api(image, confidence_threshold=0.3):
-    """Faz predição usando a API do Hugging Face."""
+def predict_with_api(image, confidence_threshold=0.3):
+    """Predição via API do Hugging Face."""
     try:
-        # URL da API do Hugging Face
         API_URL = "https://api-inference.huggingface.co/models/beingamit99/car_damage_detection"
         
-        # Converter imagem para bytes
         buffer = BytesIO()
         image.save(buffer, format="JPEG")
         img_bytes = buffer.getvalue()
         
-        # Fazer requisição para a API
-        response = requests.post(API_URL, data=img_bytes)
+        response = requests.post(API_URL, data=img_bytes, timeout=30)
         
         if response.status_code == 200:
             results = response.json()
@@ -165,7 +190,6 @@ def predict_with_huggingface_api(image, confidence_threshold=0.3):
             detections = []
             for result in results:
                 if result['score'] >= confidence_threshold:
-                    # Mapear label para nome conhecido
                     class_name = result['label']
                     mapped_name = DAMAGE_CONFIG['class_mapping'].get(class_name, class_name)
                     
@@ -179,18 +203,18 @@ def predict_with_huggingface_api(image, confidence_threshold=0.3):
             return detections, "API Hugging Face"
             
         elif response.status_code == 503:
-            st.warning("⏳ Modelo está carregando na API do Hugging Face. Tente novamente em alguns segundos.")
-            return [], "API Hugging Face (Carregando)"
+            st.warning("⏳ Modelo carregando na API. Tente novamente em alguns segundos.")
+            return [], "API (Carregando)"
         else:
-            st.error(f"Erro na API: {response.status_code} - {response.text}")
-            return [], "API Hugging Face (Erro)"
+            st.error(f"Erro na API: {response.status_code}")
+            return [], "API (Erro)"
             
     except Exception as e:
-        st.error(f"Erro na API do Hugging Face: {e}")
-        return [], "API Hugging Face (Erro)"
+        st.warning(f"Erro na API: {e}")
+        return [], "API (Erro)"
 
 def predict_with_yolo(image, model, confidence_threshold=0.5):
-    """Faz predição usando YOLO como fallback."""
+    """Predição com YOLO."""
     try:
         img_array = np.array(image)
         results = model(img_array, conf=confidence_threshold)
@@ -209,8 +233,11 @@ def predict_with_yolo(image, model, confidence_threshold=0.5):
                                 bbox = boxes.xyxy[i].cpu().numpy().tolist()
                                 class_name = model.names.get(class_id, f"class_{class_id}")
                                 
+                                # Mapear para classes conhecidas
+                                mapped_name = DAMAGE_CONFIG['class_mapping'].get(class_name, class_name)
+                                
                                 detection = {
-                                    'class': class_name,
+                                    'class': mapped_name,
                                     'confidence': confidence,
                                     'bbox': bbox
                                 }
@@ -221,30 +248,27 @@ def predict_with_yolo(image, model, confidence_threshold=0.5):
         return detections, "YOLO"
         
     except Exception as e:
-        st.error(f"Erro na predição YOLO: {e}")
+        st.error(f"Erro YOLO: {e}")
         return [], "YOLO (Erro)"
 
 def create_annotated_image(image, detections, model_type):
-    """Cria imagem anotada com as detecções."""
+    """Cria imagem anotada."""
+    if not MATPLOTLIB_AVAILABLE:
+        return np.array(image)
+    
     try:
-        import matplotlib.pyplot as plt
-        from io import BytesIO
-        
         fig, ax = plt.subplots(1, figsize=(10, 8))
         ax.imshow(image)
         ax.axis('off')
         
-        # Adicionar título
         ax.set_title(f"Análise: {model_type}", fontsize=16, weight='bold', pad=20)
         
-        # Adicionar texto com as detecções
         y_offset = 30
-        for i, detection in enumerate(detections[:5]):  # Mostrar apenas top 5
+        for i, detection in enumerate(detections[:5]):
             class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'])
             confidence = detection['confidence']
             severity = DAMAGE_CONFIG['severity_map'].get(detection['class'], 'Moderado')
             
-            # Cor baseada na severidade
             color = {'Leve': 'yellow', 'Moderado': 'orange', 'Severo': 'red'}.get(severity, 'blue')
             
             text = f"{class_name}: {confidence:.1%} ({severity})"
@@ -252,7 +276,6 @@ def create_annotated_image(image, detections, model_type):
                    bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.8),
                    fontsize=11, color='black', weight='bold')
         
-        # Converter para imagem
         buf = BytesIO()
         plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
         buf.seek(0)
@@ -263,7 +286,7 @@ def create_annotated_image(image, detections, model_type):
         return np.array(annotated_image)
         
     except Exception as e:
-        st.warning(f"Erro ao criar imagem anotada: {e}")
+        st.warning(f"Erro ao anotar imagem: {e}")
         return np.array(image)
 
 def filter_valid_detections(detections):
@@ -272,14 +295,13 @@ def filter_valid_detections(detections):
     
     for detection in detections:
         class_name = detection['class']
-        # Aceitar apenas classes conhecidas de dano
         if class_name in DAMAGE_CONFIG['class_names']:
             valid_detections.append(detection)
     
     return valid_detections
 
 def create_damage_analysis(detections):
-    """Analisa as detecções de danos."""
+    """Analisa detecções."""
     damage_report = []
     for i, detection in enumerate(detections):
         class_name = detection['class']
@@ -302,7 +324,7 @@ def create_damage_analysis(detections):
     return damage_report
 
 def create_detection_summary(detections):
-    """Cria resumo das detecções."""
+    """Cria resumo."""
     if not detections:
         return "Nenhum dano detectado na imagem."
     
@@ -316,7 +338,7 @@ def create_detection_summary(detections):
     return "\n".join(summary)
 
 def create_confidence_chart(damage_analysis):
-    """Cria gráfico de confiança."""
+    """Cria gráfico."""
     if not damage_analysis:
         return None
     
@@ -336,7 +358,7 @@ def create_confidence_chart(damage_analysis):
     return fig
 
 def create_damage_report_json(damage_analysis, vehicle_info, model_type):
-    """Gera relatório em JSON."""
+    """Gera relatório JSON."""
     severity_count = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
     total_cost = 0
     
@@ -355,7 +377,7 @@ def create_damage_report_json(damage_analysis, vehicle_info, model_type):
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
-            "version": "3.1",
+            "version": "4.0",
             "model": f"{model_type} (beingamit99/car_damage_detection)",
         },
         "vehicle_info": vehicle_info,
@@ -374,23 +396,31 @@ def main():
     st.markdown("""
     <div style='background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 1rem; border-radius: 10px; margin-bottom: 2rem;'>
         <h1 style='color: white; text-align: center; margin: 0;'>🚗 Carglass - Detector de Danos Veiculares</h1>
-        <p style='color: white; text-align: center; margin: 0.5rem 0 0 0;'>Análise de danos com IA via API (Versão 3.1)</p>
+        <p style='color: white; text-align: center; margin: 0.5rem 0 0 0;'>Sistema Completo de Análise de Danos (Versão 4.0)</p>
     </div>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
         st.header("Configurações")
         
-        # Seleção do método
+        # Verificar modelos disponíveis
+        available_methods = []
+        if TRANSFORMERS_AVAILABLE:
+            available_methods.append("transformers")
+        available_methods.append("api_hf")
+        if YOLO_AVAILABLE:
+            available_methods.append("yolo")
+        
         method_choice = st.selectbox(
             "Método de Análise:",
-            options=["api_hf", "yolo_fallback"],
+            options=available_methods,
             format_func=lambda x: {
-                "api_hf": "🤗 API Hugging Face (Recomendado)",
-                "yolo_fallback": "⚡ YOLO (Fallback)"
+                "transformers": "🤗 Transformers Local (Melhor)",
+                "api_hf": "🌐 API Hugging Face",
+                "yolo": "⚡ YOLO (Fallback)"
             }[x],
             index=0,
-            help="API do Hugging Face usa modelo especializado em danos"
+            help="Transformers local é mais rápido e confiável"
         )
         
         confidence_threshold = st.slider(
@@ -398,24 +428,14 @@ def main():
             min_value=0.1, 
             max_value=0.9, 
             value=0.3, 
-            step=0.1,
-            help="Threshold mais baixo detecta mais danos"
+            step=0.1
         )
         
-        st.header("Sobre o Sistema")
-        st.markdown("""
-        **Versão 3.1 - API Hugging Face**
-        
-        **Modelo Especializado:**
-        - 🔴 Rachadura (Crack)
-        - 🟡 Risco (Scratch)  
-        - 🔴 Pneu Vazio (Tire Flat)
-        - 🟠 Amassado (Dent)
-        - 🔴 Vidro Quebrado (Glass Shatter)
-        - 🔴 Lâmpada Quebrada (Lamp Broken)
-        
-        **Sem instalações extras!**
-        """)
+        st.header("Status do Sistema")
+        st.write(f"🤗 Transformers: {'✅' if TRANSFORMERS_AVAILABLE else '❌'}")
+        st.write(f"⚡ YOLO: {'✅' if YOLO_AVAILABLE else '❌'}")
+        st.write(f"📊 Matplotlib: {'✅' if MATPLOTLIB_AVAILABLE else '❌'}")
+        st.write(f"🖼️ OpenCV: {'✅' if cv2 else '❌'}")
         
         st.header("Informações do Veículo")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
@@ -423,9 +443,18 @@ def main():
         vehicle_year = st.number_input("Ano", min_value=1990, max_value=datetime.now().year + 1, value=datetime.now().year)
         vehicle_color = st.text_input("Cor", placeholder="Ex: Branco")
 
-    # Carregar modelo YOLO se necessário
+    # Carregar modelos
+    pipe = None
     yolo_model, yolo_name = None, None
-    if method_choice == "yolo_fallback":
+    
+    if method_choice == "transformers" and TRANSFORMERS_AVAILABLE:
+        pipe = load_transformer_pipeline()
+        if pipe:
+            st.success("✅ Transformers carregado localmente!")
+        else:
+            st.error("❌ Erro ao carregar Transformers")
+            return
+    elif method_choice == "yolo" and YOLO_AVAILABLE:
         yolo_model, yolo_name = load_yolo_model()
         if yolo_model:
             st.success(f"✅ {yolo_name} carregado!")
@@ -438,8 +467,7 @@ def main():
     st.header("1. Upload da Imagem")
     uploaded_file = st.file_uploader(
         "Escolha uma imagem do veículo:",
-        type=['png', 'jpg', 'jpeg'],
-        help="Envie uma foto clara do veículo para análise de danos"
+        type=['png', 'jpg', 'jpeg']
     )
 
     if uploaded_file is not None:
@@ -450,17 +478,16 @@ def main():
             st.subheader("📸 Imagem Original")
             st.image(image, caption=uploaded_file.name, use_container_width=True)
         
-        with st.spinner("🔍 Analisando danos com IA especializada..."):
-            # Fazer predição baseada no método escolhido
-            if method_choice == "api_hf":
-                detections, model_type = predict_with_huggingface_api(image, confidence_threshold)
+        with st.spinner("🔍 Analisando danos..."):
+            # Fazer predição
+            if method_choice == "transformers" and pipe:
+                detections, model_type = predict_with_transformer(image, pipe, confidence_threshold)
+            elif method_choice == "api_hf":
+                detections, model_type = predict_with_api(image, confidence_threshold)
             else:
                 detections, model_type = predict_with_yolo(image, yolo_model, confidence_threshold)
             
-            # Filtrar detecções válidas
             valid_detections = filter_valid_detections(detections)
-            
-            # Criar imagem anotada
             annotated_img = create_annotated_image(image, valid_detections, model_type)
             damage_analysis = create_damage_analysis(valid_detections)
 
@@ -468,41 +495,39 @@ def main():
             st.subheader("🎯 Análise de Danos")
             st.image(annotated_img, caption=f"Análise: {model_type}", use_container_width=True)
 
-        # Mostrar resultados
+        # Resultados
         if not valid_detections:
-            st.success("✅ Nenhum dano detectado na imagem!")
+            st.success("✅ Nenhum dano detectado!")
             if len(detections) > 0:
-                st.info(f"💡 {len(detections)} detecções foram filtradas. Tente diminuir o threshold.")
-            else:
-                st.info("💡 Tente diminuir o threshold de confiança se houver danos visíveis.")
+                st.info(f"💡 {len(detections)} detecções filtradas.")
             st.balloons()
         else:
-            st.header("2. Resultados da Análise")
+            st.header("2. Resultados")
             total_cost = sum(d['estimated_cost'] for d in damage_analysis)
             urgency = create_damage_report_json(damage_analysis, {}, model_type)['damage_analysis']['repair_urgency']
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("🔍 Danos Detectados", len(damage_analysis))
-            c2.metric("💰 Custo Estimado", f"R$ {total_cost:,.2f}")
+            c1.metric("🔍 Danos", len(damage_analysis))
+            c2.metric("💰 Custo", f"R$ {total_cost:,.2f}")
             c3.metric("⚠️ Urgência", urgency)
 
-            st.markdown("### Resumo dos Danos")
             summary = create_detection_summary(valid_detections)
+            st.markdown("### Resumo")
             st.markdown(summary)
 
             if damage_analysis:
-                st.markdown("### Detalhes dos Danos")
+                st.markdown("### Detalhes")
                 df_display = pd.DataFrame(damage_analysis)[['class_display', 'severity', 'confidence', 'estimated_cost']]
                 df_display['confidence'] = df_display['confidence'].apply(lambda x: f"{x:.1%}")
                 df_display['estimated_cost'] = df_display['estimated_cost'].apply(lambda x: f"R$ {x:,.2f}")
-                df_display.columns = ['Tipo de Dano', 'Severidade', 'Confiança', 'Custo Estimado']
+                df_display.columns = ['Tipo', 'Severidade', 'Confiança', 'Custo']
                 st.dataframe(df_display, use_container_width=True)
 
                 chart = create_confidence_chart(damage_analysis)
                 if chart:
                     st.plotly_chart(chart, use_container_width=True)
 
-                st.header("3. Relatório de Inspeção")
+                st.header("3. Relatório")
                 vehicle_info = {
                     "plate": vehicle_plate or "Não informado",
                     "model": vehicle_model or "Não informado", 
@@ -513,33 +538,16 @@ def main():
                 report_json = json.dumps(report, indent=2, ensure_ascii=False)
                 
                 st.download_button(
-                    label="📄 Baixar Relatório Completo (JSON)",
+                    label="📄 Baixar Relatório (JSON)",
                     data=report_json,
-                    file_name=f"relatorio_danos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    file_name=f"relatorio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                     mime="application/json"
                 )
-                
-                with st.expander("Visualizar JSON do Relatório"):
-                    st.json(report)
     else:
-        st.info("👆 **Aguardando imagem para análise.**")
-        
-        with st.expander("💡 Dicas para Melhores Resultados"):
-            st.markdown("""
-            **Para obter melhores detecções:**
-            
-            1. **API Hugging Face** é o método recomendado
-            2. **Use fotos claras** com boa iluminação
-            3. **Foque nas áreas danificadas** 
-            4. **Threshold 30%** é ideal para detectar mais danos
-            5. **Modelo especializado** em 6 tipos específicos de dano
-            6. **Sem instalações** - funciona direto no Streamlit Cloud
-            
-            **Se a API estiver carregando, aguarde alguns segundos e tente novamente.**
-            """)
+        st.info("👆 Aguardando imagem para análise.")
 
     st.markdown("---")
-    st.markdown("<p style='text-align: center; color: grey;'>Carglass IA v3.1 - Powered by Hugging Face API</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: grey;'>Carglass IA v4.0 - Sistema Completo</p>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
