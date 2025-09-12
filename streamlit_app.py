@@ -46,7 +46,9 @@ DAMAGE_CONFIG = {
         'wheel': 'Não é dano',
         'mirror': 'Não é dano',
         'door': 'Não é dano',
-        'window': 'Não é dano'
+        'window': 'Não é dano',
+        'bumper': 'Não é dano',
+        'hood': 'Não é dano'
     },
     'location_map': {
         'dent': 'Carroceria',
@@ -127,46 +129,65 @@ def download_model_from_release():
     return model_path
 
 @st.cache_resource
-def load_model():
+def load_model(use_custom_model=True):
     """Carrega o modelo YOLOv8 treinado para detecção de danos."""
     
-    # Primeiro, tenta baixar o modelo se necessário
-    model_path = download_model_from_release()
-    
-    if model_path is None:
-        return None
+    if use_custom_model:
+        # Primeiro, tenta baixar o modelo customizado
+        model_path = download_model_from_release()
         
-    if not os.path.exists(model_path):
-        st.error(f"Modelo '{model_path}' não encontrado após o download.")
-        return None
-        
-    try:
-        model = YOLO(model_path)
-        return model
-    except Exception as e:
-        st.error(f"Erro ao carregar o modelo: {str(e)}")
-        return None
+        if model_path is None:
+            return None
+            
+        if not os.path.exists(model_path):
+            st.error(f"Modelo '{model_path}' não encontrado após o download.")
+            return None
+            
+        try:
+            model = YOLO(model_path)
+            return model
+        except Exception as e:
+            st.error(f"Erro ao carregar o modelo customizado: {str(e)}")
+            return None
+    else:
+        # Usar modelo genérico YOLOv8
+        try:
+            model = YOLO('yolov8n.pt')  # Modelo pequeno e rápido
+            return model
+        except Exception as e:
+            st.error(f"Erro ao carregar modelo genérico: {str(e)}")
+            return None
 
-def filter_valid_detections(detections):
-    """Filtra detecções para manter apenas danos reais."""
+def filter_valid_detections(detections, confidence_threshold=0.5):
+    """Filtra detecções para manter apenas danos reais com confiança adequada."""
     valid_detections = []
     
     for detection in detections:
         class_name = detection['class']
+        confidence = detection['confidence']
         severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
         
+        # Filtrar por confiança
+        if confidence < confidence_threshold:
+            st.info(f"🔍 '{class_name}' ignorado - confiança muito baixa ({confidence:.1%})")
+            continue
+        
         # Filtrar classes que não são danos
-        if severity != 'Não é dano':
-            valid_detections.append(detection)
-        else:
-            st.info(f"🔍 Detectado '{class_name}' mas não é considerado um dano - ignorado.")
+        if severity == 'Não é dano':
+            st.info(f"🔍 '{class_name}' ignorado - não é considerado um dano")
+            continue
+        
+        # Se chegou até aqui, é uma detecção válida
+        valid_detections.append(detection)
     
     return valid_detections
 
-def process_image(image, model):
+def process_image(image, model, confidence_threshold=0.5):
     """Processa a imagem com o modelo YOLO e retorna as detecções e a imagem anotada."""
     img_array = np.array(image)
-    results = model(img_array)
+    
+    # Executar inferência com threshold personalizado
+    results = model(img_array, conf=confidence_threshold)
     
     detections = []
     if len(results[0].boxes) > 0:
@@ -181,7 +202,7 @@ def process_image(image, model):
             detections.append(detection)
     
     # Filtrar detecções válidas
-    valid_detections = filter_valid_detections(detections)
+    valid_detections = filter_valid_detections(detections, confidence_threshold)
     
     annotated_img = results[0].plot()
     if cv2 is not None:
@@ -279,7 +300,7 @@ def create_damage_report_json(damage_analysis, vehicle_info):
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
-            "version": "2.0",
+            "version": "2.1",
             "model": "YOLOv8 (car_damage_best.pt)",
         },
         "vehicle_info": vehicle_info,
@@ -304,18 +325,30 @@ def main():
     """, unsafe_allow_html=True)
 
     with st.sidebar:
+        st.header("Configurações do Modelo")
+        
+        # Seleção do modelo
+        use_custom_model = st.checkbox("Usar modelo customizado", value=True, help="Desmarque para usar modelo genérico YOLOv8")
+        
+        # Threshold de confiança
+        confidence_threshold = st.slider(
+            "Threshold de Confiança", 
+            min_value=0.1, 
+            max_value=0.9, 
+            value=0.6, 
+            step=0.1,
+            help="Detecções com confiança abaixo deste valor serão ignoradas"
+        )
+        
         st.header("Sobre o Sistema")
         st.markdown("""
-        **Versão 2.0 - Corrigida**
+        **Versão 2.1 - Melhorada**
         
-        Este sistema utiliza um modelo de IA (YOLOv8) treinado especificamente para **identificar e classificar danos em veículos** a partir de imagens.
-        
-        **Funcionalidades:**
-        1. Detecção automática de danos.
-        2. Filtro de detecções irrelevantes.
-        3. Classificação de severidade.
-        4. Estimativa de custo de reparo.
-        5. Geração de relatório detalhado.
+        **Melhorias:**
+        - ⚙️ Threshold de confiança ajustável
+        - 🔄 Opção de modelo alternativo
+        - 🔍 Filtros inteligentes
+        - 📊 Debug detalhado
         """)
         
         st.header("Informações do Veículo (Opcional)")
@@ -324,16 +357,19 @@ def main():
         vehicle_year = st.number_input("Ano", min_value=1990, max_value=datetime.now().year + 1, value=datetime.now().year)
         vehicle_color = st.text_input("Cor", placeholder="Ex: Branco")
 
-    model = load_model()
+    model = load_model(use_custom_model)
     if model is None:
-        st.error("❌ Não foi possível carregar o modelo. Verifique se o modelo foi enviado para o GitHub Releases v2.0.0")
+        st.error("❌ Não foi possível carregar o modelo.")
         return
 
-    st.success("✅ Modelo carregado com sucesso!")
+    model_type = "Customizado (car_damage_best.pt)" if use_custom_model else "Genérico (YOLOv8n)"
+    st.success(f"✅ Modelo {model_type} carregado com sucesso!")
     
     # Mostrar classes do modelo para debug
     with st.expander("🔍 Classes do Modelo (Debug)"):
-        st.write("Classes detectáveis pelo modelo:")
+        st.write(f"**Modelo**: {model_type}")
+        st.write(f"**Threshold de Confiança**: {confidence_threshold:.1%}")
+        st.write("**Classes detectáveis:**")
         for i, class_name in model.names.items():
             severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
             if severity == 'Não é dano':
@@ -359,7 +395,7 @@ def main():
             st.image(image, caption=f"Imagem original: {uploaded_file.name}", use_container_width=True)
         
         with st.spinner("🔍 Analisando imagem em busca de danos..."):
-            valid_detections, annotated_img, all_detections = process_image(image, model)
+            valid_detections, annotated_img, all_detections = process_image(image, model, confidence_threshold)
             damage_analysis = create_damage_analysis(valid_detections)
 
         with col2:
@@ -368,10 +404,12 @@ def main():
 
         # Mostrar informações de debug
         if len(all_detections) > len(valid_detections):
-            st.info(f"ℹ️ Detectadas {len(all_detections)} classes, mas {len(all_detections) - len(valid_detections)} foram filtradas por não serem danos.")
+            st.info(f"ℹ️ Detectadas {len(all_detections)} classes, mas {len(all_detections) - len(valid_detections)} foram filtradas.")
 
         if not valid_detections:
             st.success("✅ Nenhuma avaria detectada na imagem!")
+            if len(all_detections) > 0:
+                st.info(f"💡 **Dica**: {len(all_detections)} detecções foram filtradas. Tente diminuir o threshold de confiança.")
             st.balloons()
         else:
             st.header("2. Resultados da Análise")
@@ -419,6 +457,20 @@ def main():
                 st.json(report)
     else:
         st.info("👆 **Aguardando imagem para análise.**")
+        
+        # Dicas para melhor uso
+        with st.expander("💡 Dicas para Melhores Resultados"):
+            st.markdown("""
+            **Para obter melhores detecções:**
+            
+            1. **Qualidade da imagem**: Use fotos nítidas e bem iluminadas
+            2. **Ângulo**: Fotografe o veículo de frente ou lateral
+            3. **Distância**: Mantenha uma distância adequada (nem muito perto, nem muito longe)
+            4. **Threshold**: Ajuste o threshold de confiança conforme necessário:
+               - **Alto (70-90%)**: Menos detecções, mais precisas
+               - **Baixo (30-50%)**: Mais detecções, menos precisas
+            5. **Modelo**: Teste ambos os modelos para comparar resultados
+            """)
 
     st.markdown("---")
     st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com ❤️ pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
