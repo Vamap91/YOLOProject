@@ -3,246 +3,291 @@ from PIL import Image
 import pandas as pd
 import json
 import datetime
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import re
+import requests
+import os
+from ultralytics import YOLO
+import numpy as np
 
 st.set_page_config(
-    page_title="Carglass - LLaMA Vision Detector",
+    page_title="Carglass - Sistema Híbrido Inteligente",
     page_icon="🛡️",
     layout="wide"
 )
 
 @st.cache_resource
-def load_llama_model():
+def load_damage_model():
+    model_url = "https://github.com/ReverendBayes/YOLO11m-Car-Damage-Detector/raw/main/trained.pt"
+    model_path = "trained.pt"
+    
+    if not os.path.exists(model_path):
+        st.info("🔄 Baixando modelo YOLO11m especializado...")
+        try:
+            response = requests.get(model_url, stream=True)
+            if response.status_code == 200:
+                with open(model_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                st.success("✅ Modelo YOLO11m carregado!")
+            else:
+                st.warning("⚠️ Usando modelo genérico")
+                return YOLO('yolov8n.pt'), False
+        except:
+            st.warning("⚠️ Usando modelo genérico")
+            return YOLO('yolov8n.pt'), False
+    
     try:
-        model_name = "Kakyoin03/car-damage-detection-llama-vision-14k"
-        
-        st.info("🔄 Carregando modelo LLaMA Vision (pode levar alguns minutos)...")
-        
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            trust_remote_code=True
-        )
-        
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        st.success("✅ Modelo LLaMA Vision carregado com sucesso!")
-        return model, tokenizer, True
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar modelo LLaMA: {e}")
-        return None, None, False
-
-def analyze_car_damage_llama(image, model, tokenizer):
-    try:
-        prompt = """Analise esta imagem de veículo e forneça um relatório detalhado dos danos em formato JSON com as seguintes informações:
-
-{
-  "danos_detectados": [
-    {
-      "tipo": "tipo do dano",
-      "localizacao": "localização específica",
-      "severidade": "Leve/Moderado/Severo",
-      "descricao": "descrição detalhada",
-      "confianca": "porcentagem de confiança"
-    }
-  ],
-  "resumo": {
-    "total_danos": "número",
-    "severidade_geral": "classificação geral",
-    "areas_afetadas": ["lista de áreas"],
-    "custo_estimado": "estimativa em reais"
-  }
-}
-
-Seja preciso e técnico na análise."""
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image", "image": image}
-                ]
-            }
-        ]
-
-        inputs = tokenizer.apply_chat_template(
-            messages, 
-            return_tensors="pt", 
-            add_generation_prompt=True
-        )
-
-        with torch.no_grad():
-            outputs = model.generate(
-                inputs,
-                max_new_tokens=800,
-                temperature=0.1,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        analysis = response.split("assistant")[-1].strip()
-        
-        return parse_llama_response(analysis)
-        
-    except Exception as e:
-        st.error(f"Erro na análise: {e}")
-        return None
-
-def parse_llama_response(response):
-    try:
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-            return json.loads(json_str)
-        else:
-            return parse_text_response(response)
+        model = YOLO(model_path)
+        return model, True
     except:
-        return parse_text_response(response)
+        return YOLO('yolov8n.pt'), False
 
-def parse_text_response(response):
-    detections = []
+def intelligent_damage_analysis(detections, image_size):
+    """Análise inteligente dos danos detectados"""
     
-    damage_keywords = {
-        'risco': 'Risco',
-        'scratch': 'Risco', 
-        'amassado': 'Amassado',
-        'dent': 'Amassado',
-        'rachadura': 'Rachadura',
-        'crack': 'Rachadura',
-        'quebrado': 'Vidro Quebrado',
-        'broken': 'Vidro Quebrado',
-        'deformação': 'Deformação'
+    width, height = image_size
+    enhanced_detections = []
+    
+    damage_intelligence = {
+        'dent': {
+            'portuguese_name': 'Amassado',
+            'severity_logic': lambda area: 'Severo' if area > 5000 else 'Moderado' if area > 2000 else 'Leve',
+            'repair_cost': lambda severity: {'Severo': 1500, 'Moderado': 800, 'Leve': 400}[severity],
+            'urgency': lambda severity: {'Severo': 'Alta', 'Moderado': 'Média', 'Leve': 'Baixa'}[severity],
+            'description': lambda severity, location: f"Amassado {severity.lower()} detectado na região {location}. {'Reparo urgente necessário.' if severity == 'Severo' else 'Reparo recomendado para restaurar aparência.'}"
+        },
+        'scratch': {
+            'portuguese_name': 'Risco',
+            'severity_logic': lambda area: 'Moderado' if area > 3000 else 'Leve',
+            'repair_cost': lambda severity: {'Moderado': 600, 'Leve': 250}[severity],
+            'urgency': lambda severity: {'Moderado': 'Média', 'Leve': 'Baixa'}[severity],
+            'description': lambda severity, location: f"Risco {severity.lower()} na pintura da região {location}. {'Retoque recomendado para evitar oxidação.' if severity == 'Moderado' else 'Retoque estético opcional.'}"
+        },
+        'crack': {
+            'portuguese_name': 'Rachadura',
+            'severity_logic': lambda area: 'Severo' if area > 2000 else 'Moderado',
+            'repair_cost': lambda severity: {'Severo': 1200, 'Moderado': 700}[severity],
+            'urgency': lambda severity: {'Severo': 'Alta', 'Moderado': 'Média'}[severity],
+            'description': lambda severity, location: f"Rachadura {severity.lower()} em {location}. {'Substituição necessária por questões de segurança.' if severity == 'Severo' else 'Reparo recomendado.'}"
+        },
+        'shattered_glass': {
+            'portuguese_name': 'Vidro Quebrado',
+            'severity_logic': lambda area: 'Severo',
+            'repair_cost': lambda severity: 2500,
+            'urgency': lambda severity: 'Crítica',
+            'description': lambda severity, location: f"Vidro quebrado em {location}. Substituição imediata obrigatória por segurança."
+        },
+        'broken_lamp': {
+            'portuguese_name': 'Lâmpada Quebrada',
+            'severity_logic': lambda area: 'Moderado',
+            'repair_cost': lambda severity: 400,
+            'urgency': lambda severity: 'Média',
+            'description': lambda severity, location: f"Lâmpada danificada em {location}. Substituição necessária para conformidade legal."
+        },
+        'flat_tire': {
+            'portuguese_name': 'Pneu Vazio',
+            'severity_logic': lambda area: 'Severo',
+            'repair_cost': lambda severity: 300,
+            'urgency': lambda severity: 'Alta',
+            'description': lambda severity, location: f"Pneu vazio detectado. Verificação e possível substituição necessária."
+        }
     }
     
-    severity_keywords = {
-        'leve': 'Leve',
-        'light': 'Leve',
-        'moderado': 'Moderado',
-        'moderate': 'Moderado',
-        'severo': 'Severo',
-        'severe': 'Severo',
-        'grave': 'Severo'
-    }
-    
-    lines = response.split('\n')
-    damage_count = 0
-    
-    for line in lines:
-        line_lower = line.lower()
+    def determine_location(bbox, width, height):
+        x_center = (bbox['x1'] + bbox['x2']) / 2
+        y_center = (bbox['y1'] + bbox['y2']) / 2
         
-        for keyword, damage_type in damage_keywords.items():
-            if keyword in line_lower:
-                damage_count += 1
-                
-                severity = 'Moderado'
-                for sev_key, sev_val in severity_keywords.items():
-                    if sev_key in line_lower:
-                        severity = sev_val
-                        break
-                
-                location = 'Carroceria'
-                if 'frente' in line_lower or 'front' in line_lower:
-                    location = 'Frente'
-                elif 'traseira' in line_lower or 'rear' in line_lower:
-                    location = 'Traseira'
-                elif 'lateral' in line_lower or 'side' in line_lower:
-                    location = 'Lateral'
-                elif 'porta' in line_lower or 'door' in line_lower:
-                    location = 'Porta'
-                elif 'capô' in line_lower or 'hood' in line_lower:
-                    location = 'Capô'
-                
-                detection = {
-                    'tipo': damage_type,
-                    'localizacao': location,
-                    'severidade': severity,
-                    'descricao': line.strip(),
-                    'confianca': '85%'
+        x_ratio = x_center / width
+        y_ratio = y_center / height
+        
+        if y_ratio > 0.7:
+            return "Para-choque frontal"
+        elif y_ratio < 0.3:
+            return "Teto/Para-brisa"
+        elif x_ratio < 0.3:
+            return "Lateral esquerda"
+        elif x_ratio > 0.7:
+            return "Lateral direita"
+        elif y_ratio > 0.5:
+            return "Frente"
+        else:
+            return "Centro do veículo"
+    
+    for detection in detections:
+        damage_type = detection['damage_type'].lower().replace(' ', '_')
+        
+        if damage_type in damage_intelligence:
+            intel = damage_intelligence[damage_type]
+            area = detection['area_pixels']
+            location = determine_location(detection['bbox'], width, height)
+            
+            severity = intel['severity_logic'](area)
+            cost = intel['repair_cost'](severity)
+            urgency = intel['urgency'](severity)
+            description = intel['description'](severity, location)
+            
+            enhanced_detection = {
+                'id': detection['id'],
+                'damage_type': intel['portuguese_name'],
+                'severity': severity,
+                'location': location,
+                'confidence': detection['confidence'],
+                'bbox': detection['bbox'],
+                'area_pixels': area,
+                'repair_cost': cost,
+                'urgency': urgency,
+                'description': description,
+                'technical_details': {
+                    'area_cm2': round(area * 0.01, 2),
+                    'position_ratio': {
+                        'x': round((detection['bbox']['x1'] + detection['bbox']['x2']) / (2 * width), 3),
+                        'y': round((detection['bbox']['y1'] + detection['bbox']['y2']) / (2 * height), 3)
+                    }
                 }
-                detections.append(detection)
-                break
+            }
+            enhanced_detections.append(enhanced_detection)
     
-    if not detections:
-        detections.append({
-            'tipo': 'Dano Detectado',
-            'localizacao': 'Veículo',
-            'severidade': 'Moderado',
-            'descricao': 'Análise detectou possíveis danos no veículo',
-            'confianca': '75%'
-        })
-    
-    return {
-        'danos_detectados': detections,
-        'resumo': {
-            'total_danos': len(detections),
-            'severidade_geral': 'Moderado',
-            'areas_afetadas': list(set([d['localizacao'] for d in detections])),
-            'custo_estimado': f'R$ {len(detections) * 800:,.2f}'
-        }
-    }
+    return enhanced_detections
 
-def create_damage_report_json(vehicle_info, analysis_result):
-    if not analysis_result:
-        return {"error": "Falha na análise"}
-    
+def process_intelligent_detection(image, model, is_damage_model):
+    results = model(image)
     detections = []
-    for i, dano in enumerate(analysis_result.get('danos_detectados', [])):
-        detection = {
-            'id': i + 1,
-            'damage_type': dano.get('tipo', 'Dano'),
-            'severity': dano.get('severidade', 'Moderado'),
-            'location': dano.get('localizacao', 'Carroceria'),
-            'confidence': float(dano.get('confianca', '80%').replace('%', '')) / 100,
-            'description': dano.get('descricao', 'Dano detectado'),
-            'bbox': {'x1': 0, 'y1': 0, 'x2': 100, 'y2': 100}
-        }
-        detections.append(detection)
     
-    resumo = analysis_result.get('resumo', {})
+    if results and len(results) > 0 and hasattr(results[0], 'boxes') and results[0].boxes is not None:
+        boxes = results[0].boxes
+        
+        if len(boxes) > 0:
+            for i, box in enumerate(boxes):
+                try:
+                    class_id = int(box.cls[0])
+                    confidence = float(box.conf[0])
+                    bbox = box.xyxy[0].cpu().numpy()
+                    
+                    if confidence > 0.3:
+                        class_name = model.names[class_id]
+                        
+                        detection = {
+                            'id': i + 1,
+                            'damage_type': class_name,
+                            'confidence': confidence,
+                            'bbox': {
+                                'x1': float(bbox[0]),
+                                'y1': float(bbox[1]),
+                                'x2': float(bbox[2]),
+                                'y2': float(bbox[3])
+                            },
+                            'area_pixels': float((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]))
+                        }
+                        detections.append(detection)
+                        
+                except Exception as e:
+                    continue
+    
+    try:
+        annotated_img = results[0].plot()
+        annotated_img_rgb = annotated_img[..., ::-1]
+    except:
+        annotated_img_rgb = np.array(image)
+    
+    enhanced_detections = intelligent_damage_analysis(detections, image.size)
+    
+    return enhanced_detections, annotated_img_rgb
+
+def create_comprehensive_report(vehicle_info, detections):
+    total_cost = sum([d['repair_cost'] for d in detections])
+    
+    urgency_priority = {'Crítica': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1}
+    max_urgency = max([urgency_priority.get(d['urgency'], 1) for d in detections]) if detections else 1
+    overall_urgency = {4: 'Crítica', 3: 'Alta', 2: 'Média', 1: 'Baixa'}[max_urgency]
     
     report = {
         "inspection_info": {
             "timestamp": datetime.datetime.now().isoformat(),
-            "inspector": "LLaMA Vision AI",
-            "version": "6.0",
-            "model": "Kakyoin03/car-damage-detection-llama-vision-14k"
+            "inspector": "Sistema Híbrido Carglass",
+            "version": "7.0",
+            "model": "YOLO11m + Análise Inteligente",
+            "analysis_method": "Detecção automática com interpretação contextual"
         },
         "vehicle_info": vehicle_info,
         "damage_summary": {
-            "total_damages": resumo.get('total_danos', len(detections)),
-            "severity_count": {
-                "Leve": len([d for d in detections if d['severity'] == 'Leve']),
-                "Moderado": len([d for d in detections if d['severity'] == 'Moderado']),
-                "Severo": len([d for d in detections if d['severity'] == 'Severo'])
+            "total_damages": len(detections),
+            "total_repair_cost": f"R$ {total_cost:,.2f}",
+            "overall_urgency": overall_urgency,
+            "severity_distribution": {
+                "Crítico": len([d for d in detections if d['urgency'] == 'Crítica']),
+                "Alto": len([d for d in detections if d['urgency'] == 'Alta']),
+                "Médio": len([d for d in detections if d['urgency'] == 'Média']),
+                "Baixo": len([d for d in detections if d['urgency'] == 'Baixa'])
             },
             "damage_types": list(set([d['damage_type'] for d in detections])),
-            "estimated_total_cost": resumo.get('custo_estimado', 'R$ 1.500,00'),
-            "affected_areas": resumo.get('areas_afetadas', ['Carroceria'])
+            "affected_areas": list(set([d['location'] for d in detections]))
         },
         "detections": detections,
-        "llama_analysis": analysis_result
+        "recommendations": generate_smart_recommendations(detections),
+        "repair_timeline": generate_repair_timeline(detections)
     }
     return report
 
+def generate_smart_recommendations(detections):
+    recommendations = []
+    
+    critical_damages = [d for d in detections if d['urgency'] == 'Crítica']
+    high_damages = [d for d in detections if d['urgency'] == 'Alta']
+    
+    if critical_damages:
+        recommendations.append({
+            "priority": "URGENTE - 24h",
+            "action": "Reparo imediato obrigatório",
+            "damages": [d['damage_type'] for d in critical_damages],
+            "reason": "Questões de segurança e conformidade legal",
+            "estimated_cost": f"R$ {sum([d['repair_cost'] for d in critical_damages]):,.2f}"
+        })
+    
+    if high_damages:
+        recommendations.append({
+            "priority": "Alta - 1 semana",
+            "action": "Reparo recomendado",
+            "damages": [d['damage_type'] for d in high_damages],
+            "reason": "Prevenção de agravamento e manutenção do valor",
+            "estimated_cost": f"R$ {sum([d['repair_cost'] for d in high_damages]):,.2f}"
+        })
+    
+    return recommendations
+
+def generate_repair_timeline(detections):
+    timeline = []
+    
+    for detection in sorted(detections, key=lambda x: {'Crítica': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1}[x['urgency']], reverse=True):
+        timeframes = {
+            'Crítica': '24-48 horas',
+            'Alta': '1-2 semanas',
+            'Média': '2-4 semanas',
+            'Baixa': '1-3 meses'
+        }
+        
+        timeline.append({
+            "damage": detection['damage_type'],
+            "location": detection['location'],
+            "timeframe": timeframes[detection['urgency']],
+            "cost": f"R$ {detection['repair_cost']:,.2f}"
+        })
+    
+    return timeline
+
 st.image("https://logodownload.org/wp-content/uploads/2019/11/carglass-logo-0.png", width=250)
-st.title("🛡️ Sistema LLaMA Vision - Detecção Avançada")
-st.markdown("**Análise inteligente de danos com modelo LLaMA Vision 11B**")
+st.title("🛡️ Sistema Híbrido Inteligente Carglass")
+st.markdown("**YOLO11m + Análise Contextual = Precisão Máxima**")
 
-model, tokenizer, model_loaded = load_llama_model()
+model, is_damage_model = load_damage_model()
 
-if not model_loaded:
-    st.error("❌ Não foi possível carregar o modelo LLaMA Vision.")
-    st.info("💡 **Alternativa:** Use o modelo YOLO11m que funciona de forma mais estável.")
+if model is None:
+    st.error("❌ Erro ao carregar modelo")
     st.stop()
 
-st.success("🧠 **Modelo LLaMA Vision Ativo** - Análise avançada com IA conversacional")
-st.info("🎯 **Capacidades:** Detecção precisa, localização específica, relatórios detalhados em linguagem natural")
+if is_damage_model:
+    st.success("🎯 **Modelo YOLO11m Especializado Ativo** + Análise Inteligente")
+    st.info("🧠 **Capacidades:** Detecção precisa + Interpretação contextual + Estimativas realistas")
+else:
+    st.warning("⚠️ **Modo Demonstração** - Usando modelo genérico com análise inteligente")
 
 st.sidebar.header("📋 Informações do Veículo")
 vehicle_plate = st.sidebar.text_input("Placa", "ABC-1234")
@@ -263,7 +308,10 @@ uploaded_file = st.sidebar.file_uploader("Selecione uma imagem do veículo:", ty
 if uploaded_file:
     image = Image.open(uploaded_file)
     
-    st.header("🧠 Análise com LLaMA Vision")
+    st.header("🔍 Análise Híbrida Inteligente")
+    
+    with st.spinner("🧠 Processando com sistema híbrido..."):
+        detections, annotated_img = process_intelligent_detection(image, model, is_damage_model)
     
     col1, col2 = st.columns(2)
     
@@ -272,75 +320,83 @@ if uploaded_file:
         st.image(image, use_column_width=True)
     
     with col2:
-        st.subheader("🤖 Análise IA")
+        st.subheader("🎯 Danos Detectados")
+        st.image(annotated_img, use_column_width=True)
+    
+    if detections:
+        st.header("📊 Análise Inteligente")
         
-        if st.button("🔍 Analisar com LLaMA Vision", type="primary"):
-            with st.spinner("🧠 LLaMA Vision analisando a imagem..."):
-                analysis_result = analyze_car_damage_llama(image, model, tokenizer)
-            
-            if analysis_result:
-                st.success("✅ Análise concluída!")
+        total_cost = sum([d['repair_cost'] for d in detections])
+        avg_confidence = sum([d['confidence'] for d in detections]) / len(detections)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total de Danos", len(detections))
+        
+        with col2:
+            critical_count = len([d for d in detections if d['urgency'] in ['Crítica', 'Alta']])
+            st.metric("Danos Críticos/Altos", critical_count, delta="⚠️" if critical_count > 0 else "✅")
+        
+        with col3:
+            st.metric("Confiança Média", f"{avg_confidence:.1%}")
+        
+        with col4:
+            st.metric("Custo Total", f"R$ {total_cost:,.2f}")
+        
+        st.subheader("📋 Análise Detalhada dos Danos")
+        
+        for detection in detections:
+            with st.expander(f"{detection['damage_type']} - {detection['location']} (Urgência: {detection['urgency']})"):
+                col1, col2 = st.columns(2)
                 
-                resumo = analysis_result.get('resumo', {})
-                
-                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Total de Danos", resumo.get('total_danos', 0))
+                    st.write(f"**Tipo:** {detection['damage_type']}")
+                    st.write(f"**Severidade:** {detection['severity']}")
+                    st.write(f"**Localização:** {detection['location']}")
+                    st.write(f"**Confiança:** {detection['confidence']:.1%}")
+                
                 with col2:
-                    st.metric("Severidade Geral", resumo.get('severidade_geral', 'N/A'))
-                with col3:
-                    st.metric("Custo Estimado", resumo.get('custo_estimado', 'N/A'))
+                    st.write(f"**Custo Estimado:** R$ {detection['repair_cost']:,.2f}")
+                    st.write(f"**Urgência:** {detection['urgency']}")
+                    st.write(f"**Área:** {detection['technical_details']['area_cm2']} cm²")
                 
-                st.subheader("📋 Danos Detectados")
-                
-                for i, dano in enumerate(analysis_result.get('danos_detectados', []), 1):
-                    with st.expander(f"Dano {i}: {dano.get('tipo', 'N/A')} - {dano.get('localizacao', 'N/A')}"):
-                        st.write(f"**Tipo:** {dano.get('tipo', 'N/A')}")
-                        st.write(f"**Localização:** {dano.get('localizacao', 'N/A')}")
-                        st.write(f"**Severidade:** {dano.get('severidade', 'N/A')}")
-                        st.write(f"**Confiança:** {dano.get('confianca', 'N/A')}")
-                        st.write(f"**Descrição:** {dano.get('descricao', 'N/A')}")
-                
-                st.header("📄 Relatório JSON Completo")
-                report_json = create_damage_report_json(vehicle_info, analysis_result)
-                st.json(report_json)
-                
-                json_str = json.dumps(report_json, indent=2, ensure_ascii=False)
-                st.download_button(
-                    label="💾 Baixar Relatório JSON",
-                    data=json_str,
-                    file_name=f"relatorio_llama_{vehicle_plate}_{datetime.date.today().strftime('%Y%m%d')}.json",
-                    mime="application/json"
-                )
+                st.write(f"**Análise:** {detection['description']}")
+        
+        st.header("📄 Relatório Completo JSON")
+        report_json = create_comprehensive_report(vehicle_info, detections)
+        st.json(report_json)
+        
+        json_str = json.dumps(report_json, indent=2, ensure_ascii=False)
+        st.download_button(
+            label="💾 Baixar Relatório Completo",
+            data=json_str,
+            file_name=f"relatorio_hibrido_{vehicle_plate}_{datetime.date.today().strftime('%Y%m%d')}.json",
+            mime="application/json"
+        )
+        
+        st.header("💡 Recomendações Inteligentes")
+        recommendations = report_json['recommendations']
+        
+        for rec in recommendations:
+            if 'URGENTE' in rec['priority']:
+                st.error(f"🚨 **{rec['priority']}:** {rec['action']}")
+                st.write(f"**Danos:** {', '.join(rec['damages'])}")
+                st.write(f"**Motivo:** {rec['reason']}")
+                st.write(f"**Custo:** {rec['estimated_cost']}")
             else:
-                st.error("❌ Falha na análise. Tente novamente.")
+                st.warning(f"⚠️ **{rec['priority']}:** {rec['action']}")
+                st.write(f"**Danos:** {', '.join(rec['damages'])}")
+                st.write(f"**Motivo:** {rec['reason']}")
+                st.write(f"**Custo:** {rec['estimated_cost']}")
+    
+    else:
+        st.success("✅ Nenhum dano detectado!")
+        report_json = create_comprehensive_report(vehicle_info, [])
+        st.json(report_json)
 
 else:
     st.info("👆 Aguardando o envio de uma imagem na barra lateral.")
-    
-    st.header("🧠 Sobre o LLaMA Vision")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        **🎯 Capacidades Avançadas:**
-        - Detecção de riscos, amassados, rachaduras
-        - Localização precisa (porta, capô, para-choque)
-        - Avaliação de severidade inteligente
-        - Relatórios em linguagem natural
-        - Suporte multilíngue (PT/EN/FR)
-        """)
-    
-    with col2:
-        st.markdown("""
-        **⚡ Performance:**
-        - Modelo: LLaMA 3.2 11B Vision
-        - Dataset: 14.000 imagens de treinamento
-        - Loss final: 0.0758 (excelente)
-        - Precisão: 90%+ em danos visíveis
-        - Tempo: ~10-30 segundos por análise
-        """)
 
 st.markdown("---")
-st.markdown("**Carglass - LLaMA Vision AI** | Análise Inteligente de Danos")
+st.markdown("**Carglass - Sistema Híbrido Inteligente** | YOLO11m + IA Contextual")
