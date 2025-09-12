@@ -23,22 +23,44 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Configuração expandida para lidar com diferentes classes do modelo
 DAMAGE_CONFIG = {
     'severity_map': {
+        # Classes de danos reais
+        'dent': 'Moderado',
+        'scratch': 'Leve',
+        'crack': 'Leve',
         'shattered_glass': 'Severo',
         'broken_lamp': 'Severo',
         'flat_tire': 'Severo',
-        'dent': 'Moderado',
-        'scratch': 'Leve',
-        'crack': 'Leve'
+        # Classes que podem aparecer no modelo (variações)
+        'bonnet-dent': 'Moderado',
+        'door-dent': 'Moderado',
+        'bumper-dent': 'Moderado',
+        'side-dent': 'Moderado',
+        'rear-dent': 'Moderado',
+        'front-dent': 'Moderado',
+        # Classes que NÃO são danos (filtrar)
+        'headlight': 'Não é dano',
+        'taillight': 'Não é dano',
+        'wheel': 'Não é dano',
+        'mirror': 'Não é dano',
+        'door': 'Não é dano',
+        'window': 'Não é dano'
     },
     'location_map': {
-        'shattered_glass': 'Para-brisa/Vidros',
-        'flat_tire': 'Rodas',
-        'broken_lamp': 'Faróis/Lanternas',
         'dent': 'Carroceria',
+        'bonnet-dent': 'Capô',
+        'door-dent': 'Porta',
+        'bumper-dent': 'Para-choque',
+        'side-dent': 'Lateral',
+        'rear-dent': 'Traseira',
+        'front-dent': 'Dianteira',
         'scratch': 'Pintura',
-        'crack': 'Para-choque/Plásticos'
+        'crack': 'Para-choque/Plásticos',
+        'shattered_glass': 'Para-brisa/Vidros',
+        'broken_lamp': 'Faróis/Lanternas',
+        'flat_tire': 'Rodas'
     },
     'cost_ranges': {
         'Severo': (1500, 3500),
@@ -46,12 +68,18 @@ DAMAGE_CONFIG = {
         'Leve': (200, 600)
     },
     'class_names': {
+        'dent': 'Amassado',
+        'bonnet-dent': 'Amassado no Capô',
+        'door-dent': 'Amassado na Porta',
+        'bumper-dent': 'Amassado no Para-choque',
+        'side-dent': 'Amassado Lateral',
+        'rear-dent': 'Amassado Traseiro',
+        'front-dent': 'Amassado Dianteiro',
+        'scratch': 'Risco',
+        'crack': 'Rachadura',
         'shattered_glass': 'Vidro Quebrado',
         'broken_lamp': 'Lâmpada Quebrada',
-        'flat_tire': 'Pneu Vazio',
-        'dent': 'Amassado',
-        'scratch': 'Risco',
-        'crack': 'Rachadura'
+        'flat_tire': 'Pneu Vazio'
     }
 }
 
@@ -119,6 +147,22 @@ def load_model():
         st.error(f"Erro ao carregar o modelo: {str(e)}")
         return None
 
+def filter_valid_detections(detections):
+    """Filtra detecções para manter apenas danos reais."""
+    valid_detections = []
+    
+    for detection in detections:
+        class_name = detection['class']
+        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
+        
+        # Filtrar classes que não são danos
+        if severity != 'Não é dano':
+            valid_detections.append(detection)
+        else:
+            st.info(f"🔍 Detectado '{class_name}' mas não é considerado um dano - ignorado.")
+    
+    return valid_detections
+
 def process_image(image, model):
     """Processa a imagem com o modelo YOLO e retorna as detecções e a imagem anotada."""
     img_array = np.array(image)
@@ -136,32 +180,38 @@ def process_image(image, model):
             }
             detections.append(detection)
     
+    # Filtrar detecções válidas
+    valid_detections = filter_valid_detections(detections)
+    
     annotated_img = results[0].plot()
     if cv2 is not None:
         annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
     
-    return detections, annotated_img
+    return valid_detections, annotated_img, detections
 
 def create_damage_analysis(detections):
     """Analisa as detecções de danos para gerar um relatório detalhado."""
     damage_report = []
     for i, detection in enumerate(detections):
         class_name = detection['class']
-        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Indefinido')
+        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
         location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
-        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
-        estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
         
-        damage_report.append({
-            'damage_id': f"DMG_{i+1:03d}",
-            'class': class_name,
-            'class_display': DAMAGE_CONFIG['class_names'].get(class_name, class_name.replace('_', ' ').title()),
-            'confidence': detection['confidence'],
-            'severity': severity,
-            'location': location,
-            'estimated_cost': estimated_cost,
-            'bbox': detection['bbox']
-        })
+        # Só processar se for um dano válido
+        if severity in ['Leve', 'Moderado', 'Severo']:
+            cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
+            estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
+            
+            damage_report.append({
+                'damage_id': f"DMG_{i+1:03d}",
+                'class': class_name,
+                'class_display': DAMAGE_CONFIG['class_names'].get(class_name, class_name.replace('_', ' ').replace('-', ' ').title()),
+                'confidence': detection['confidence'],
+                'severity': severity,
+                'location': location,
+                'estimated_cost': estimated_cost,
+                'bbox': detection['bbox']
+            })
     return damage_report
 
 def create_detection_summary(detections):
@@ -171,7 +221,7 @@ def create_detection_summary(detections):
     
     damage_counts = {}
     for detection in detections:
-        class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'])
+        class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'].replace('_', ' ').replace('-', ' ').title())
         if class_name not in damage_counts:
             damage_counts[class_name] = []
         damage_counts[class_name].append(detection['confidence'])
@@ -211,7 +261,10 @@ def create_damage_report_json(damage_analysis, vehicle_info):
     total_cost = 0
     
     for damage in damage_analysis:
-        severity_count[damage['severity']] += 1
+        # Verificar se a severidade existe antes de incrementar
+        if damage['severity'] in severity_count:
+            severity_count[damage['severity']] += 1
+        
         if damage['class_display'] not in damage_types:
             damage_types.append(damage['class_display'])
         total_cost += damage['estimated_cost']
@@ -253,15 +306,16 @@ def main():
     with st.sidebar:
         st.header("Sobre o Sistema")
         st.markdown("""
-        **Versão 2.0**
+        **Versão 2.0 - Corrigida**
         
         Este sistema utiliza um modelo de IA (YOLOv8) treinado especificamente para **identificar e classificar danos em veículos** a partir de imagens.
         
         **Funcionalidades:**
-        1. Detecção de 6 tipos de danos.
-        2. Classificação de severidade.
-        3. Estimativa de custo de reparo.
-        4. Geração de relatório detalhado.
+        1. Detecção automática de danos.
+        2. Filtro de detecções irrelevantes.
+        3. Classificação de severidade.
+        4. Estimativa de custo de reparo.
+        5. Geração de relatório detalhado.
         """)
         
         st.header("Informações do Veículo (Opcional)")
@@ -276,6 +330,18 @@ def main():
         return
 
     st.success("✅ Modelo carregado com sucesso!")
+    
+    # Mostrar classes do modelo para debug
+    with st.expander("🔍 Classes do Modelo (Debug)"):
+        st.write("Classes detectáveis pelo modelo:")
+        for i, class_name in model.names.items():
+            severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
+            if severity == 'Não é dano':
+                st.write(f"- {class_name} ❌ (ignorado)")
+            elif severity in ['Leve', 'Moderado', 'Severo']:
+                st.write(f"- {class_name} ✅ ({severity})")
+            else:
+                st.write(f"- {class_name} ⚠️ (não configurado)")
 
     st.header("1. Upload da Imagem do Veículo")
     uploaded_file = st.file_uploader(
@@ -290,17 +356,21 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("📸 Imagem Original")
-            st.image(image, caption=f"Imagem original: {uploaded_file.name}", use_column_width=True)
+            st.image(image, caption=f"Imagem original: {uploaded_file.name}", use_container_width=True)
         
         with st.spinner("🔍 Analisando imagem em busca de danos..."):
-            detections, annotated_img = process_image(image, model)
-            damage_analysis = create_damage_analysis(detections)
+            valid_detections, annotated_img, all_detections = process_image(image, model)
+            damage_analysis = create_damage_analysis(valid_detections)
 
         with col2:
             st.subheader("🎯 Danos Detectados")
-            st.image(annotated_img, caption="Imagem com os danos destacados pela IA.", use_column_width=True)
+            st.image(annotated_img, caption="Imagem com os danos destacados pela IA.", use_container_width=True)
 
-        if not detections:
+        # Mostrar informações de debug
+        if len(all_detections) > len(valid_detections):
+            st.info(f"ℹ️ Detectadas {len(all_detections)} classes, mas {len(all_detections) - len(valid_detections)} foram filtradas por não serem danos.")
+
+        if not valid_detections:
             st.success("✅ Nenhuma avaria detectada na imagem!")
             st.balloons()
         else:
@@ -314,7 +384,7 @@ def main():
             c3.metric("⚠️ Urgência de Reparo", urgency)
 
             st.markdown("### Resumo dos Danos")
-            summary = create_detection_summary(detections)
+            summary = create_detection_summary(valid_detections)
             st.markdown(summary)
 
             st.markdown("### Detalhes dos Danos")
