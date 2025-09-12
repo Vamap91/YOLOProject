@@ -1,3 +1,4 @@
+
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -6,12 +7,12 @@ import json
 from datetime import datetime
 import plotly.express as px
 import pandas as pd
-
 from ultralytics import YOLO
 
 try:
     import cv2
 except ImportError:
+    st.warning("OpenCV não está instalado, a anotação de imagens pode não funcionar como esperado.")
     cv2 = None
 
 st.set_page_config(
@@ -24,7 +25,7 @@ st.set_page_config(
 DAMAGE_CONFIG = {
     'severity_map': {
         'shattered_glass': 'Severo',
-        'broken_lamp': 'Severo', 
+        'broken_lamp': 'Severo',
         'flat_tire': 'Severo',
         'dent': 'Moderado',
         'scratch': 'Leve',
@@ -55,135 +56,110 @@ DAMAGE_CONFIG = {
 
 @st.cache_resource
 def load_model():
+    """Carrega o modelo YOLOv8 treinado para detecção de danos."""
+    model_path = 'car_damage_best.pt'
+    if not os.path.exists(model_path):
+        st.error(f"Modelo '{model_path}' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
+        return None
     try:
-        model = YOLO('yolov8m.pt')
+        model = YOLO(model_path)
         return model
     except Exception as e:
         st.error(f"Erro ao carregar o modelo: {str(e)}")
         return None
 
 def process_image(image, model):
+    """Processa a imagem com o modelo YOLO e retorna as detecções e a imagem anotada."""
     img_array = np.array(image)
     results = model(img_array)
     
     detections = []
     if len(results[0].boxes) > 0:
-        boxes = results[0].boxes
-        for i in range(len(boxes)):
+        for box in results[0].boxes:
+            class_id = int(box.cls)
+            class_name = model.names[class_id]
             detection = {
-                'class': results[0].names[int(boxes.cls[i])],
-                'confidence': float(boxes.conf[i]),
-                'bbox': boxes.xyxy[i].cpu().numpy()
+                'class': class_name,
+                'confidence': float(box.conf),
+                'bbox': box.xyxy[0].cpu().numpy().tolist()
             }
             detections.append(detection)
     
-    try:
-        annotated_img = results[0].plot()
-        if cv2 is not None:
-            annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
-    except:
-        annotated_img = img_array
+    annotated_img = results[0].plot()
+    if cv2 is not None:
+        annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
     
     return detections, annotated_img
 
+def create_damage_analysis(detections):
+    """Analisa as detecções de danos para gerar um relatório detalhado."""
+    damage_report = []
+    for i, detection in enumerate(detections):
+        class_name = detection['class']
+        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Indefinido')
+        location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
+        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
+        estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
+        
+        damage_report.append({
+            'damage_id': f"DMG_{i+1:03d}",
+            'class': class_name,
+            'class_display': DAMAGE_CONFIG['class_names'].get(class_name, class_name.replace('_', ' ').title()),
+            'confidence': detection['confidence'],
+            'severity': severity,
+            'location': location,
+            'estimated_cost': estimated_cost,
+            'bbox': detection['bbox']
+        })
+    return damage_report
+
 def create_detection_summary(detections):
+    """Cria um resumo em texto das detecções."""
     if not detections:
-        return "Nenhum objeto detectado na imagem."
+        return "Nenhum dano detectado na imagem."
     
-    object_counts = {}
+    damage_counts = {}
     for detection in detections:
-        obj_type = detection['class']
-        if obj_type not in object_counts:
-            object_counts[obj_type] = []
-        object_counts[obj_type].append(detection['confidence'])
+        class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'])
+        if class_name not in damage_counts:
+            damage_counts[class_name] = []
+        damage_counts[class_name].append(detection['confidence'])
     
-    summary = []
-    total_objects = len(detections)
-    
-    summary.append(f"**Total de objetos detectados: {total_objects}**\n")
-    
-    for obj_type, confidences in object_counts.items():
+    summary = [f"**Total de danos detectados: {len(detections)}**\n"]
+    for damage_type, confidences in damage_counts.items():
         count = len(confidences)
         avg_confidence = np.mean(confidences)
-        summary.append(f"• **{obj_type.replace('_', ' ').title()}**: {count} detectado(s) - Confiança média: {avg_confidence:.1%}")
+        summary.append(f"• **{damage_type}**: {count} detectado(s) - Confiança média: {avg_confidence:.1%}")
     
     return "\n".join(summary)
 
-def create_confidence_chart(detections):
-    if not detections:
+def create_confidence_chart(damage_analysis):
+    """Cria um gráfico de barras com a confiança das detecções."""
+    if not damage_analysis:
         return None
     
-    df = pd.DataFrame(detections)
-    df['class_clean'] = df['class'].str.replace('_', ' ').str.title()
-    
+    df = pd.DataFrame(damage_analysis)
     fig = px.bar(
         df, 
-        x='class_clean', 
+        x='class_display', 
         y='confidence',
-        title='Confiança das Detecções por Tipo de Objeto',
-        labels={'confidence': 'Confiança (%)', 'class_clean': 'Tipo de Objeto'},
+        title='Confiança das Detecções por Tipo de Dano',
+        labels={'confidence': 'Confiança (%)', 'class_display': 'Tipo de Dano'},
         color='confidence',
-        color_continuous_scale='RdYlGn'
+        color_continuous_scale='RdYlGn',
+        text='confidence'
     )
-    
-    fig.update_layout(
-        xaxis_tickangle=-45,
-        height=400,
-        showlegend=False
-    )
-    
-    fig.update_layout(yaxis=dict(tickformat='.1%'))
-    
+    fig.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+    fig.update_layout(xaxis_tickangle=-45, height=400, showlegend=False, yaxis=dict(tickformat='.0%'))
     return fig
 
-def simulate_damage_analysis(detections):
-    simulated_damages = []
-    
-    car_detected = any(d['class'].lower() in ['car', 'truck', 'bus'] for d in detections)
-    
-    if car_detected:
-        max_confidence = max([d['confidence'] for d in detections if d['class'].lower() in ['car', 'truck', 'bus']])
-        
-        if max_confidence > 0.5:
-            simulated_damages.append({
-                'damage_id': "SIM_001",
-                'class': 'dent',
-                'class_display': 'Amassado (Análise Simulada)',
-                'confidence': float(max_confidence * 0.8),
-                'severity': 'Moderado',
-                'location': 'Carroceria',
-                'estimated_cost': int(np.random.randint(500, 1500)),
-                'bbox': {'x1': 100, 'y1': 100, 'x2': 200, 'y2': 200}
-            })
-        
-        if max_confidence > 0.7:
-            simulated_damages.append({
-                'damage_id': "SIM_002",
-                'class': 'scratch',
-                'class_display': 'Possível Risco (Análise Simulada)',
-                'confidence': float(max_confidence * 0.6),
-                'severity': 'Leve',
-                'location': 'Pintura',
-                'estimated_cost': int(np.random.randint(200, 600)),
-                'bbox': {'x1': 150, 'y1': 150, 'x2': 250, 'y2': 180}
-            })
-    
-    return simulated_damages
-
-def create_damage_report_json(detections, simulated_damages, vehicle_info=None):
-    if vehicle_info is None:
-        vehicle_info = {
-            "plate": "Não informado",
-            "model": "Não informado", 
-            "year": "Não informado",
-            "color": "Não informado"
-        }
-    
+def create_damage_report_json(damage_analysis, vehicle_info):
+    """Gera o relatório final em formato JSON."""
     severity_count = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
     damage_types = []
     total_cost = 0
     
-    for damage in simulated_damages:
+    for damage in damage_analysis:
         severity_count[damage['severity']] += 1
         if damage['class_display'] not in damage_types:
             damage_types.append(damage['class_display'])
@@ -192,184 +168,135 @@ def create_damage_report_json(detections, simulated_damages, vehicle_info=None):
     urgency = 'Baixa'
     if severity_count['Severo'] > 0:
         urgency = 'Alta'
-    elif severity_count['Moderado'] > 1:
+    elif severity_count['Moderado'] > 0:
         urgency = 'Média'
-    
+
     report = {
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
-            "version": "5.0",
-            "model": "YOLOv8m + Análise Simulada",
-            "confidence_threshold": 0.25
+            "version": "2.0",
+            "model": "YOLOv8 (car_damage_best.pt)",
         },
         "vehicle_info": vehicle_info,
-        "objects_detected": detections,
         "damage_analysis": {
-            "total_damages": len(simulated_damages),
+            "total_damages": len(damage_analysis),
             "severity_count": severity_count,
-            "damage_types": damage_types,
+            "damage_types": sorted(list(set(d['class_display'] for d in damage_analysis))),
             "estimated_total_cost": f"R$ {total_cost:,.2f}",
             "repair_urgency": urgency,
-            "note": "Análise simulada baseada na detecção de veículos"
         },
-        "simulated_damages": simulated_damages
+        "damages": damage_analysis
     }
-    
     return report
 
 def main():
+    """Função principal que executa a aplicação Streamlit."""
     st.markdown("""
     <div style='background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 1rem; border-radius: 10px; margin-bottom: 2rem;'>
         <h1 style='color: white; text-align: center; margin: 0;'>🚗 Carglass - Detector de Danos Veiculares</h1>
-        <p style='color: white; text-align: center; margin: 0.5rem 0 0 0;'>Sistema IA para Detecção de Objetos + Análise Simulada de Danos</p>
+        <p style='color: white; text-align: center; margin: 0.5rem 0 0 0;'>Análise de danos em tempo real com Inteligência Artificial</p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     with st.sidebar:
         st.header("Sobre o Sistema")
         st.markdown("""
-        **Versão Atual**: Detecção de objetos com YOLOv8m
+        **Versão 2.0**
         
-        **Como funciona:**
-        1. Detecta objetos na imagem (carros, pessoas, etc.)
-        2. Se detectar veículos, simula análise de danos
-        3. Gera relatório baseado na análise
+        Este sistema utiliza um modelo de IA (YOLOv8) treinado especificamente para **identificar e classificar danos em veículos** a partir de imagens.
         
-        **Nota**: Esta é uma versão de demonstração que simula a detecção de danos até o modelo especializado estar pronto.
+        **Funcionalidades:**
+        1. Detecção de 6 tipos de danos.
+        2. Classificação de severidade.
+        3. Estimativa de custo de reparo.
+        4. Geração de relatório detalhado.
         """)
-        
-        st.header("Informações do Veículo")
+        st.header("Informações do Veículo (Opcional)")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
         vehicle_model = st.text_input("Modelo", placeholder="Ex: Toyota Corolla")
-        vehicle_year = st.number_input("Ano", min_value=1990, max_value=2025, value=2020)
+        vehicle_year = st.number_input("Ano", min_value=1990, max_value=datetime.now().year + 1, value=datetime.now().year)
         vehicle_color = st.text_input("Cor", placeholder="Ex: Branco")
-    
+
     model = load_model()
     if model is None:
-        st.error("❌ Não foi possível carregar o modelo. Verifique a instalação do Ultralytics.")
         return
-    
-    st.success("✅ Modelo YOLOv8m carregado com sucesso!")
-    
-    st.header("Upload da Imagem")
+
+    st.header("1. Upload da Imagem do Veículo")
     uploaded_file = st.file_uploader(
-        "Escolha uma imagem do veículo:",
+        "Escolha uma imagem para análise:",
         type=['png', 'jpg', 'jpeg'],
-        help="Formatos aceitos: PNG, JPG, JPEG"
+        help="Envie uma imagem de um veículo para que a IA possa detectar os danos."
     )
-    
+
     if uploaded_file is not None:
-        image = Image.open(uploaded_file)
+        image = Image.open(uploaded_file).convert("RGB")
         
         col1, col2 = st.columns(2)
-        
         with col1:
             st.subheader("📸 Imagem Original")
-            st.image(image, caption=uploaded_file.name, use_column_width=True)
+            st.image(image, caption=f"Imagem original: {uploaded_file.name}", use_column_width=True)
         
-        with st.spinner("🔍 Analisando imagem..."):
+        with st.spinner("🔍 Analisando imagem em busca de danos..."):
             detections, annotated_img = process_image(image, model)
-        
+            damage_analysis = create_damage_analysis(detections)
+
         with col2:
-            st.subheader("🎯 Objetos Detectados")
-            st.image(annotated_img, caption="Detecções encontradas", use_column_width=True)
-        
-        st.header("📊 Resumo da Detecção")
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.markdown("### 🔍 Objetos Encontrados")
+            st.subheader("🎯 Danos Detectados")
+            st.image(annotated_img, caption="Imagem com os danos destacados pela IA.", use_column_width=True)
+
+        if not detections:
+            st.success("✅ Nenhuma avaria detectada na imagem!")
+            st.balloons()
+        else:
+            st.header("2. Resultados da Análise")
+            total_cost = sum(d['estimated_cost'] for d in damage_analysis)
+            urgency = create_damage_report_json(damage_analysis, {})['damage_analysis']['repair_urgency']
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🔍 Total de Danos", len(damage_analysis))
+            c2.metric("💰 Custo Total Estimado", f"R$ {total_cost:,.2f}")
+            c3.metric("Urência de Reparo", urgency)
+
+            st.markdown("### Resumo dos Danos")
             summary = create_detection_summary(detections)
             st.markdown(summary)
-        
-        with col2:
-            st.markdown("### 📈 Gráfico de Confiança")
-            if detections:
-                chart = create_confidence_chart(detections)
-                if chart:
-                    st.plotly_chart(chart, use_container_width=True)
-            else:
-                st.info("Nenhum objeto detectado para exibir no gráfico.")
-        
-        simulated_damages = simulate_damage_analysis(detections)
-        
-        if simulated_damages:
-            st.header("🔧 Análise Simulada de Danos")
-            st.info("⚠️ **Nota**: Esta é uma análise simulada baseada na presença de veículos detectados. Para análise real de danos, aguarde o modelo especializado.")
-            
-            total_cost = sum([d['estimated_cost'] for d in simulated_damages])
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("🔍 Danos Simulados", len(simulated_damages))
-            with col2:
-                st.metric("💰 Custo Estimado", f"R$ {total_cost:,.2f}")
-            with col3:
-                if simulated_damages:
-                    avg_conf = np.mean([d['confidence'] for d in simulated_damages])
-                    st.metric("📈 Confiança Média", f"{avg_conf:.1%}")
-                else:
-                    st.metric("📈 Confiança Média", "N/A")
-            
-            df_damages = pd.DataFrame(simulated_damages)
-            df_display = df_damages[['damage_id', 'class_display', 'severity', 'estimated_cost']].copy()
+
+            st.markdown("### Detalhes dos Danos")
+            df_display = pd.DataFrame(damage_analysis)[['class_display', 'severity', 'confidence', 'estimated_cost']]
+            df_display['confidence'] = df_display['confidence'].apply(lambda x: f"{x:.1%}")
             df_display['estimated_cost'] = df_display['estimated_cost'].apply(lambda x: f"R$ {x:,.2f}")
-            df_display['confidence'] = df_damages['confidence'].apply(lambda x: f"{x:.1%}")
-            df_display.columns = ['ID', 'Tipo de Dano', 'Severidade', 'Custo Est.', 'Confiança']
-            
+            df_display.columns = ['Tipo de Dano', 'Severidade', 'Confiança', 'Custo Estimado']
             st.dataframe(df_display, use_container_width=True)
-        
-        if detections:
-            st.header("📄 Relatório Completo")
-            
+
+            st.markdown("### Gráfico de Confiança")
+            chart = create_confidence_chart(damage_analysis)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True)
+
+            st.header("3. Relatório de Inspeção")
             vehicle_info = {
                 "plate": vehicle_plate or "Não informado",
                 "model": vehicle_model or "Não informado",
                 "year": str(vehicle_year),
                 "color": vehicle_color or "Não informado"
             }
-            
-            report = create_damage_report_json(detections, simulated_damages, vehicle_info)
-            
+            report = create_damage_report_json(damage_analysis, vehicle_info)
             report_json = json.dumps(report, indent=2, ensure_ascii=False)
+            
             st.download_button(
-                label="📄 Baixar Relatório JSON",
+                label="📄 Baixar Relatório Completo (JSON)",
                 data=report_json,
-                file_name=f"relatorio_carglass_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                file_name=f"relatorio_danos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
             )
-            
-            with st.expander("📋 Resumo do Relatório"):
-                st.write(f"**Objetos detectados**: {len(detections)}")
-                st.write(f"**Danos simulados**: {len(simulated_damages)}")
-                if simulated_damages:
-                    st.write(f"**Custo total estimado**: R$ {sum([d['estimated_cost'] for d in simulated_damages]):,.2f}")
-                st.write(f"**Timestamp**: {report['inspection_info']['timestamp']}")
-        
-        else:
-            st.warning("⚠️ Nenhum objeto foi detectado na imagem. Tente com uma imagem diferente.")
-    
+            with st.expander("Visualizar JSON do Relatório"):
+                st.json(report)
     else:
-        st.info("👆 **Faça upload de uma imagem** para começar a análise")
-        
-        st.markdown("### 💡 Como funciona:")
-        st.markdown("""
-        1. **Upload**: Envie uma foto do veículo
-        2. **Detecção**: Sistema identifica objetos (carros, pessoas, etc.)  
-        3. **Análise**: Se detectar veículos, simula análise de danos
-        4. **Relatório**: Gera relatório com estimativas de custo
-        
-        **Aguardando**: Modelo especializado em danos veiculares em treinamento
-        """)
-    
+        st.info("👆 **Aguardando imagem para análise.**")
+
     st.markdown("---")
-    st.markdown("""
-    <div style='text-align: center; color: #666;'>
-        <p><strong>Carglass - Sistema de Detecção de Objetos + Análise Simulada</strong></p>
-        <p>Powered by YOLOv8m + Streamlit | Versão 5.0 Demo</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com ❤️ pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
