@@ -40,11 +40,6 @@ DAMAGE_CONFIG = {
         'scratch': 'Pintura',
         'crack': 'Para-choque/Plásticos'
     },
-    'cost_ranges': {
-        'Severo': (1500, 3500),
-        'Moderado': (500, 1500),
-        'Leve': (200, 600)
-    },
     'class_names': {
         'shattered_glass': 'Vidro Quebrado',
         'broken_lamp': 'Lâmpada Quebrada',
@@ -62,8 +57,6 @@ def download_model_from_release():
     if not os.path.exists(model_path):
         st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        # SUBSTITUA ESTA URL pela URL do seu GitHub Release
-        # Formato: https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/TAG/car_damage_best.pt
         model_url = "https://github.com/SEU_USUARIO/SEU_REPO/releases/download/v1.0.0/car_damage_best.pt"
         
         try:
@@ -103,7 +96,6 @@ def download_model_from_release():
 def load_model():
     """Carrega o modelo YOLOv8 treinado para detecção de danos."""
     
-    # Primeiro, tenta baixar o modelo se necessário
     model_path = download_model_from_release()
     
     if model_path is None:
@@ -148,10 +140,8 @@ def create_damage_analysis(detections):
     damage_report = []
     for i, detection in enumerate(detections):
         class_name = detection['class']
-        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Indefinido')
-        location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
-        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
-        estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
+        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')
+        location = DAMAGE_CONFIG['location_map'].get(class_name, 'Carroceria')
         
         damage_report.append({
             'damage_id': f"DMG_{i+1:03d}",
@@ -160,7 +150,6 @@ def create_damage_analysis(detections):
             'confidence': detection['confidence'],
             'severity': severity,
             'location': location,
-            'estimated_cost': estimated_cost,
             'bbox': detection['bbox']
         })
     return damage_report
@@ -209,33 +198,34 @@ def create_damage_report_json(damage_analysis, vehicle_info):
     """Gera o relatório final em formato JSON."""
     severity_count = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
     damage_types = []
-    total_cost = 0
     
     for damage in damage_analysis:
-        severity_count[damage['severity']] += 1
-        if damage['class_display'] not in damage_types:
-            damage_types.append(damage['class_display'])
-        total_cost += damage['estimated_cost']
+        severity = damage.get('severity', 'Moderado')
+        if severity in severity_count:
+            severity_count[severity] += 1
+        
+        class_display = damage.get('class_display', 'Dano Desconhecido')
+        if class_display not in damage_types:
+            damage_types.append(class_display)
     
     urgency = 'Baixa'
-    if severity_count['Severo'] > 0:
+    if severity_count.get('Severo', 0) > 0:
         urgency = 'Alta'
-    elif severity_count['Moderado'] > 0:
+    elif severity_count.get('Moderado', 0) > 0:
         urgency = 'Média'
 
     report = {
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
-            "version": "2.0",
+            "version": "2.1",
             "model": "YOLOv8 (car_damage_best.pt)",
         },
         "vehicle_info": vehicle_info,
         "damage_analysis": {
             "total_damages": len(damage_analysis),
             "severity_count": severity_count,
-            "damage_types": sorted(list(set(d['class_display'] for d in damage_analysis))),
-            "estimated_total_cost": f"R$ {total_cost:,.2f}",
+            "damage_types": sorted(damage_types),
             "repair_urgency": urgency,
         },
         "damages": damage_analysis
@@ -254,19 +244,19 @@ def main():
     with st.sidebar:
         st.header("Sobre o Sistema")
         st.markdown("""
-        **Versão 2.0**
+        **Versão 2.1**
         
         Este sistema utiliza um modelo de IA (YOLOv8) treinado especificamente para **identificar e classificar danos em veículos** a partir de imagens.
         
         **Funcionalidades:**
-        1. Detecção de 6 tipos de danos.
-        2. Classificação de severidade.
-        3. Estimativa de custo de reparo.
-        4. Geração de relatório detalhado.
+        1. Detecção de 6 tipos de danos
+        2. Classificação de severidade
+        3. Contagem de peças danificadas
+        4. Geração de relatório detalhado
         """)
         
         st.header("⚙️ Configuração do Modelo")
-        st.info("🔗 **Importante**: Para usar este sistema, você precisa configurar a URL do modelo no código. Veja o arquivo GUIA_DEPLOY_MODELO_GRANDE.md")
+        st.info("🔗 **Importante**: Para usar este sistema, você precisa configurar a URL do modelo no código.")
         
         st.header("Informações do Veículo (Opcional)")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
@@ -310,12 +300,13 @@ def main():
             st.balloons()
         else:
             st.header("2. Resultados da Análise")
-            total_cost = sum(d['estimated_cost'] for d in damage_analysis)
-            urgency = create_damage_report_json(damage_analysis, {})['damage_analysis']['repair_urgency']
+            
+            report_data = create_damage_report_json(damage_analysis, {})
+            urgency = report_data['damage_analysis']['repair_urgency']
 
             c1, c2, c3 = st.columns(3)
             c1.metric("🔍 Total de Danos", len(damage_analysis))
-            c2.metric("💰 Custo Total Estimado", f"R$ {total_cost:,.2f}")
+            c2.metric("📋 Tipos de Peças", len(set(d['class_display'] for d in damage_analysis)))
             c3.metric("⚠️ Urgência de Reparo", urgency)
 
             st.markdown("### Resumo dos Danos")
@@ -323,10 +314,9 @@ def main():
             st.markdown(summary)
 
             st.markdown("### Detalhes dos Danos")
-            df_display = pd.DataFrame(damage_analysis)[['class_display', 'severity', 'confidence', 'estimated_cost']]
+            df_display = pd.DataFrame(damage_analysis)[['class_display', 'severity', 'confidence', 'location']]
             df_display['confidence'] = df_display['confidence'].apply(lambda x: f"{x:.1%}")
-            df_display['estimated_cost'] = df_display['estimated_cost'].apply(lambda x: f"R$ {x:,.2f}")
-            df_display.columns = ['Tipo de Dano', 'Severidade', 'Confiança', 'Custo Estimado']
+            df_display.columns = ['Tipo de Dano', 'Severidade', 'Confiança', 'Localização']
             st.dataframe(df_display, use_container_width=True)
 
             st.markdown("### Gráfico de Confiança")
