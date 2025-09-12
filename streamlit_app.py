@@ -23,46 +23,33 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Configuração expandida para lidar com diferentes classes do modelo
+# Configuração para o modelo público
 DAMAGE_CONFIG = {
     'severity_map': {
-        # Classes de danos reais
+        # Classes típicas de modelos de dano veicular
         'dent': 'Moderado',
         'scratch': 'Leve',
         'crack': 'Leve',
-        'shattered_glass': 'Severo',
-        'broken_lamp': 'Severo',
-        'flat_tire': 'Severo',
-        # Classes que podem aparecer no modelo (variações)
-        'bonnet-dent': 'Moderado',
-        'door-dent': 'Moderado',
-        'bumper-dent': 'Moderado',
-        'side-dent': 'Moderado',
-        'rear-dent': 'Moderado',
-        'front-dent': 'Moderado',
-        # Classes que NÃO são danos (filtrar)
-        'headlight': 'Não é dano',
-        'taillight': 'Não é dano',
-        'wheel': 'Não é dano',
-        'mirror': 'Não é dano',
-        'door': 'Não é dano',
-        'window': 'Não é dano',
-        'bumper': 'Não é dano',
-        'hood': 'Não é dano'
+        'damage': 'Moderado',
+        'broken': 'Severo',
+        'shattered': 'Severo',
+        'flat': 'Severo',
+        'minor_damage': 'Leve',
+        'major_damage': 'Severo',
+        'moderate_damage': 'Moderado',
+        # Adicionar mais conforme necessário
     },
     'location_map': {
         'dent': 'Carroceria',
-        'bonnet-dent': 'Capô',
-        'door-dent': 'Porta',
-        'bumper-dent': 'Para-choque',
-        'side-dent': 'Lateral',
-        'rear-dent': 'Traseira',
-        'front-dent': 'Dianteira',
         'scratch': 'Pintura',
         'crack': 'Para-choque/Plásticos',
-        'shattered_glass': 'Para-brisa/Vidros',
-        'broken_lamp': 'Faróis/Lanternas',
-        'flat_tire': 'Rodas'
+        'damage': 'Carroceria',
+        'broken': 'Componentes',
+        'shattered': 'Vidros',
+        'flat': 'Pneus',
+        'minor_damage': 'Superficial',
+        'major_damage': 'Estrutural',
+        'moderate_damage': 'Carroceria',
     },
     'cost_ranges': {
         'Severo': (1500, 3500),
@@ -71,26 +58,66 @@ DAMAGE_CONFIG = {
     },
     'class_names': {
         'dent': 'Amassado',
-        'bonnet-dent': 'Amassado no Capô',
-        'door-dent': 'Amassado na Porta',
-        'bumper-dent': 'Amassado no Para-choque',
-        'side-dent': 'Amassado Lateral',
-        'rear-dent': 'Amassado Traseiro',
-        'front-dent': 'Amassado Dianteiro',
         'scratch': 'Risco',
         'crack': 'Rachadura',
-        'shattered_glass': 'Vidro Quebrado',
-        'broken_lamp': 'Lâmpada Quebrada',
-        'flat_tire': 'Pneu Vazio'
+        'damage': 'Dano Geral',
+        'broken': 'Quebrado',
+        'shattered': 'Estilhaçado',
+        'flat': 'Pneu Vazio',
+        'minor_damage': 'Dano Menor',
+        'major_damage': 'Dano Maior',
+        'moderate_damage': 'Dano Moderado',
     }
 }
 
-def download_model_from_release():
-    """Baixa o modelo do GitHub Releases se não existir localmente."""
+def download_public_model():
+    """Baixa o modelo público do GitHub se não existir localmente."""
+    model_path = "trained_public.pt"
+    
+    if not os.path.exists(model_path):
+        st.info("🔄 Baixando modelo público... (primeira execução, pode levar alguns minutos)")
+        
+        # URL do modelo público do GitHub
+        model_url = "https://raw.githubusercontent.com/NabilNawa/YOLOv8-Vehicle-Damage-Detector/refs/heads/main/trained.pt"
+        
+        try:
+            response = requests.get(model_url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with open(model_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = downloaded / total_size
+                            progress_bar.progress(progress)
+                            status_text.text(f"Baixando: {downloaded / 1024 / 1024:.1f}MB / {total_size / 1024 / 1024:.1f}MB")
+            
+            progress_bar.empty()
+            status_text.empty()
+            st.success("✅ Modelo público baixado com sucesso!")
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ Erro ao baixar o modelo público: {e}")
+            return None
+        except Exception as e:
+            st.error(f"❌ Erro inesperado: {e}")
+            return None
+    
+    return model_path
+
+def download_custom_model():
+    """Baixa o modelo customizado do GitHub Releases se não existir localmente."""
     model_path = "car_damage_best.pt"
     
     if not os.path.exists(model_path):
-        st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
+        st.info("🔄 Baixando modelo customizado...")
         
         # URL do seu GitHub Release v2.0.0
         model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
@@ -116,11 +143,10 @@ def download_model_from_release():
             
             progress_bar.empty()
             status_text.empty()
-            st.success("✅ Modelo baixado com sucesso!")
+            st.success("✅ Modelo customizado baixado com sucesso!")
             
         except requests.exceptions.RequestException as e:
-            st.error(f"❌ Erro ao baixar o modelo: {e}")
-            st.error("Verifique se o modelo foi enviado para o GitHub Releases v2.0.0")
+            st.error(f"❌ Erro ao baixar o modelo customizado: {e}")
             return None
         except Exception as e:
             st.error(f"❌ Erro inesperado: {e}")
@@ -129,34 +155,36 @@ def download_model_from_release():
     return model_path
 
 @st.cache_resource
-def load_model(use_custom_model=True):
-    """Carrega o modelo YOLOv8 treinado para detecção de danos."""
+def load_model(model_choice="public"):
+    """Carrega o modelo YOLOv8 escolhido."""
     
-    if use_custom_model:
-        # Primeiro, tenta baixar o modelo customizado
-        model_path = download_model_from_release()
-        
-        if model_path is None:
-            return None
-            
-        if not os.path.exists(model_path):
-            st.error(f"Modelo '{model_path}' não encontrado após o download.")
-            return None
-            
+    if model_choice == "public":
+        model_path = download_public_model()
+        model_name = "Público (GitHub - NabilNawa)"
+    elif model_choice == "custom":
+        model_path = download_custom_model()
+        model_name = "Customizado (car_damage_best.pt)"
+    else:  # generic
         try:
-            model = YOLO(model_path)
-            return model
-        except Exception as e:
-            st.error(f"Erro ao carregar o modelo customizado: {str(e)}")
-            return None
-    else:
-        # Usar modelo genérico YOLOv8
-        try:
-            model = YOLO('yolov8n.pt')  # Modelo pequeno e rápido
-            return model
+            model = YOLO('yolov8n.pt')
+            return model, "Genérico (YOLOv8n)"
         except Exception as e:
             st.error(f"Erro ao carregar modelo genérico: {str(e)}")
-            return None
+            return None, None
+    
+    if model_path is None:
+        return None, None
+        
+    if not os.path.exists(model_path):
+        st.error(f"Modelo '{model_path}' não encontrado após o download.")
+        return None, None
+        
+    try:
+        model = YOLO(model_path)
+        return model, model_name
+    except Exception as e:
+        st.error(f"Erro ao carregar o modelo {model_name}: {str(e)}")
+        return None, None
 
 def filter_valid_detections(detections, confidence_threshold=0.5):
     """Filtra detecções para manter apenas danos reais com confiança adequada."""
@@ -165,19 +193,12 @@ def filter_valid_detections(detections, confidence_threshold=0.5):
     for detection in detections:
         class_name = detection['class']
         confidence = detection['confidence']
-        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
         
         # Filtrar por confiança
         if confidence < confidence_threshold:
-            st.info(f"🔍 '{class_name}' ignorado - confiança muito baixa ({confidence:.1%})")
             continue
         
-        # Filtrar classes que não são danos
-        if severity == 'Não é dano':
-            st.info(f"🔍 '{class_name}' ignorado - não é considerado um dano")
-            continue
-        
-        # Se chegou até aqui, é uma detecção válida
+        # Aceitar todas as detecções do modelo (assumindo que são relevantes)
         valid_detections.append(detection)
     
     return valid_detections
@@ -215,24 +236,22 @@ def create_damage_analysis(detections):
     damage_report = []
     for i, detection in enumerate(detections):
         class_name = detection['class']
-        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
-        location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
+        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')  # Default para Moderado
+        location = DAMAGE_CONFIG['location_map'].get(class_name, 'Carroceria')  # Default para Carroceria
         
-        # Só processar se for um dano válido
-        if severity in ['Leve', 'Moderado', 'Severo']:
-            cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
-            estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
-            
-            damage_report.append({
-                'damage_id': f"DMG_{i+1:03d}",
-                'class': class_name,
-                'class_display': DAMAGE_CONFIG['class_names'].get(class_name, class_name.replace('_', ' ').replace('-', ' ').title()),
-                'confidence': detection['confidence'],
-                'severity': severity,
-                'location': location,
-                'estimated_cost': estimated_cost,
-                'bbox': detection['bbox']
-            })
+        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (300, 800))
+        estimated_cost = int(np.random.randint(cost_range[0], cost_range[1]))
+        
+        damage_report.append({
+            'damage_id': f"DMG_{i+1:03d}",
+            'class': class_name,
+            'class_display': DAMAGE_CONFIG['class_names'].get(class_name, class_name.replace('_', ' ').title()),
+            'confidence': detection['confidence'],
+            'severity': severity,
+            'location': location,
+            'estimated_cost': estimated_cost,
+            'bbox': detection['bbox']
+        })
     return damage_report
 
 def create_detection_summary(detections):
@@ -242,7 +261,7 @@ def create_detection_summary(detections):
     
     damage_counts = {}
     for detection in detections:
-        class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'].replace('_', ' ').replace('-', ' ').title())
+        class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'].replace('_', ' ').title())
         if class_name not in damage_counts:
             damage_counts[class_name] = []
         damage_counts[class_name].append(detection['confidence'])
@@ -275,14 +294,13 @@ def create_confidence_chart(damage_analysis):
     fig.update_layout(xaxis_tickangle=-45, height=400, showlegend=False, yaxis=dict(tickformat='.0%'))
     return fig
 
-def create_damage_report_json(damage_analysis, vehicle_info):
+def create_damage_report_json(damage_analysis, vehicle_info, model_name):
     """Gera o relatório final em formato JSON."""
     severity_count = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
     damage_types = []
     total_cost = 0
     
     for damage in damage_analysis:
-        # Verificar se a severidade existe antes de incrementar
         if damage['severity'] in severity_count:
             severity_count[damage['severity']] += 1
         
@@ -300,8 +318,8 @@ def create_damage_report_json(damage_analysis, vehicle_info):
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
             "inspector": "Sistema IA Carglass",
-            "version": "2.1",
-            "model": "YOLOv8 (car_damage_best.pt)",
+            "version": "2.2",
+            "model": f"YOLOv8 ({model_name})",
         },
         "vehicle_info": vehicle_info,
         "damage_analysis": {
@@ -328,27 +346,37 @@ def main():
         st.header("Configurações do Modelo")
         
         # Seleção do modelo
-        use_custom_model = st.checkbox("Usar modelo customizado", value=True, help="Desmarque para usar modelo genérico YOLOv8")
+        model_choice = st.selectbox(
+            "Escolha o Modelo:",
+            options=["public", "custom", "generic"],
+            format_func=lambda x: {
+                "public": "🌟 Público (GitHub - Recomendado)",
+                "custom": "🔧 Customizado (Seu modelo)",
+                "generic": "⚡ Genérico (YOLOv8n)"
+            }[x],
+            index=0,
+            help="Modelo público é treinado especificamente para danos veiculares"
+        )
         
         # Threshold de confiança
         confidence_threshold = st.slider(
             "Threshold de Confiança", 
             min_value=0.1, 
             max_value=0.9, 
-            value=0.6, 
+            value=0.5, 
             step=0.1,
             help="Detecções com confiança abaixo deste valor serão ignoradas"
         )
         
         st.header("Sobre o Sistema")
         st.markdown("""
-        **Versão 2.1 - Melhorada**
+        **Versão 2.2 - Modelo Público**
         
-        **Melhorias:**
-        - ⚙️ Threshold de confiança ajustável
-        - 🔄 Opção de modelo alternativo
-        - 🔍 Filtros inteligentes
-        - 📊 Debug detalhado
+        **Novidades:**
+        - 🌟 Modelo público especializado
+        - 🔄 Comparação entre modelos
+        - ⚙️ Threshold ajustável
+        - 📊 Análise detalhada
         """)
         
         st.header("Informações do Veículo (Opcional)")
@@ -357,27 +385,32 @@ def main():
         vehicle_year = st.number_input("Ano", min_value=1990, max_value=datetime.now().year + 1, value=datetime.now().year)
         vehicle_color = st.text_input("Cor", placeholder="Ex: Branco")
 
-    model = load_model(use_custom_model)
+    model, model_name = load_model(model_choice)
     if model is None:
         st.error("❌ Não foi possível carregar o modelo.")
         return
 
-    model_type = "Customizado (car_damage_best.pt)" if use_custom_model else "Genérico (YOLOv8n)"
-    st.success(f"✅ Modelo {model_type} carregado com sucesso!")
+    st.success(f"✅ Modelo **{model_name}** carregado com sucesso!")
     
     # Mostrar classes do modelo para debug
-    with st.expander("🔍 Classes do Modelo (Debug)"):
-        st.write(f"**Modelo**: {model_type}")
+    with st.expander("🔍 Informações do Modelo"):
+        st.write(f"**Modelo**: {model_name}")
         st.write(f"**Threshold de Confiança**: {confidence_threshold:.1%}")
         st.write("**Classes detectáveis:**")
-        for i, class_name in model.names.items():
-            severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Desconhecido')
-            if severity == 'Não é dano':
-                st.write(f"- {class_name} ❌ (ignorado)")
-            elif severity in ['Leve', 'Moderado', 'Severo']:
-                st.write(f"- {class_name} ✅ ({severity})")
-            else:
-                st.write(f"- {class_name} ⚠️ (não configurado)")
+        
+        col1, col2 = st.columns(2)
+        classes_list = list(model.names.values())
+        mid_point = len(classes_list) // 2
+        
+        with col1:
+            for class_name in classes_list[:mid_point]:
+                severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')
+                st.write(f"• {class_name} ({severity})")
+        
+        with col2:
+            for class_name in classes_list[mid_point:]:
+                severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Moderado')
+                st.write(f"• {class_name} ({severity})")
 
     st.header("1. Upload da Imagem do Veículo")
     uploaded_file = st.file_uploader(
@@ -404,7 +437,7 @@ def main():
 
         # Mostrar informações de debug
         if len(all_detections) > len(valid_detections):
-            st.info(f"ℹ️ Detectadas {len(all_detections)} classes, mas {len(all_detections) - len(valid_detections)} foram filtradas.")
+            st.info(f"ℹ️ Detectadas {len(all_detections)} classes, mas {len(all_detections) - len(valid_detections)} foram filtradas por baixa confiança.")
 
         if not valid_detections:
             st.success("✅ Nenhuma avaria detectada na imagem!")
@@ -414,7 +447,7 @@ def main():
         else:
             st.header("2. Resultados da Análise")
             total_cost = sum(d['estimated_cost'] for d in damage_analysis)
-            urgency = create_damage_report_json(damage_analysis, {})['damage_analysis']['repair_urgency']
+            urgency = create_damage_report_json(damage_analysis, {}, model_name)['damage_analysis']['repair_urgency']
 
             c1, c2, c3 = st.columns(3)
             c1.metric("🔍 Total de Danos", len(damage_analysis))
@@ -444,7 +477,7 @@ def main():
                 "year": str(vehicle_year),
                 "color": vehicle_color or "Não informado"
             }
-            report = create_damage_report_json(damage_analysis, vehicle_info)
+            report = create_damage_report_json(damage_analysis, vehicle_info, model_name)
             report_json = json.dumps(report, indent=2, ensure_ascii=False)
             
             st.download_button(
@@ -463,13 +496,12 @@ def main():
             st.markdown("""
             **Para obter melhores detecções:**
             
-            1. **Qualidade da imagem**: Use fotos nítidas e bem iluminadas
-            2. **Ângulo**: Fotografe o veículo de frente ou lateral
-            3. **Distância**: Mantenha uma distância adequada (nem muito perto, nem muito longe)
-            4. **Threshold**: Ajuste o threshold de confiança conforme necessário:
-               - **Alto (70-90%)**: Menos detecções, mais precisas
-               - **Baixo (30-50%)**: Mais detecções, menos precisas
-            5. **Modelo**: Teste ambos os modelos para comparar resultados
+            1. **Modelo Recomendado**: Use o modelo público (já selecionado)
+            2. **Qualidade da imagem**: Use fotos nítidas e bem iluminadas
+            3. **Ângulo**: Fotografe o veículo de frente ou lateral
+            4. **Distância**: Mantenha uma distância adequada
+            5. **Threshold**: Comece com 50% e ajuste conforme necessário
+            6. **Comparação**: Teste diferentes modelos para comparar resultados
             """)
 
     st.markdown("---")
