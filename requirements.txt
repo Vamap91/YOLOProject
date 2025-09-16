@@ -1,7 +1,8 @@
 streamlit
-transformers
-torch
 pandas
 pillow
-accelerate
-bitsandbytes
+numpy
+plotly
+ultralytics
+requests
+opencv-python-headless
