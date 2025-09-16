@@ -62,7 +62,7 @@ def download_model_from_release():
     if not os.path.exists(model_path):
         st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        # URL CORRETA do seu modelo no GitHub
+        # URL CORRETA - ATUALIZADA PARA SEU REPOSITÓRIO
         model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
         
         try:
@@ -265,8 +265,7 @@ def main():
         """)
         
         st.header("⚙️ Configuração do Modelo")
-        st.success("✅ URL do modelo configurada corretamente!")
-        st.info("🔗 Modelo será baixado automaticamente do GitHub na primeira execução")
+        st.success("✅ URL do modelo configurada: Vamap91/YOLOProject v2.0.0")
         
         st.header("Informações do Veículo (Opcional)")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
@@ -277,7 +276,6 @@ def main():
     model = load_model()
     if model is None:
         st.error("❌ Não foi possível carregar o modelo. Verifique a configuração.")
-        st.info("💡 **Dica**: Se você está executando pela primeira vez, certifique-se de que a URL do modelo está configurada corretamente no código.")
         return
 
     st.success("✅ Modelo carregado com sucesso!")
