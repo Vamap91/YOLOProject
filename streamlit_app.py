@@ -62,8 +62,15 @@ def download_model_from_release():
     if not os.path.exists(model_path):
         st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        # SUBSTITUA ESTA URL pela URL do seu GitHub Release
-        # Formato: https://github.com/Vamap91/YOLOProject/releases/download/TAG/car_damage_best.pt
+        # URL CORRIGIDA - substitua pela URL real do seu modelo
+        # Para o usuário Vamap91, a URL seria algo como:
+        # https://github.com/Vamap91/YOLOProject/releases/download/v1.0.0/car_damage_best.pt
+        # 
+        # ATENÇÃO: Você precisa:
+        # 1. Criar um Release no seu repositório GitHub
+        # 2. Fazer upload do arquivo car_damage_best.pt no Release
+        # 3. Copiar a URL de download e colar aqui
+        
         model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v1.0.0/car_damage_best.pt"
         
         try:
@@ -91,7 +98,17 @@ def download_model_from_release():
             
         except requests.exceptions.RequestException as e:
             st.error(f"❌ Erro ao baixar o modelo: {e}")
-            st.error("Verifique se a URL do modelo está correta no código.")
+            st.error("⚠️ **SOLUÇÃO TEMPORÁRIA**: Coloque o arquivo 'car_damage_best.pt' na mesma pasta do streamlit_app.py")
+            st.info("""
+            **Como resolver definitivamente:**
+            1. Acesse seu repositório no GitHub: https://github.com/Vamap91/YOLOProject
+            2. Clique em 'Releases' (no lado direito da página)
+            3. Clique em 'Create a new release'
+            4. Defina uma tag (ex: v1.0.0)
+            5. Faça upload do arquivo 'car_damage_best.pt'
+            6. Publique o release
+            7. Copie a URL de download e substitua no código
+            """)
             return None
         except Exception as e:
             st.error(f"❌ Erro inesperado: {e}")
@@ -103,10 +120,32 @@ def download_model_from_release():
 def load_model():
     """Carrega o modelo YOLOv8 treinado para detecção de danos."""
     
-    # Primeiro, tenta baixar o modelo se necessário
+    # Primeiro verifica se o modelo já existe localmente
+    model_path = "car_damage_best.pt"
+    
+    if os.path.exists(model_path):
+        try:
+            model = YOLO(model_path)
+            st.success("✅ Modelo carregado do arquivo local!")
+            return model
+        except Exception as e:
+            st.error(f"Erro ao carregar modelo local: {str(e)}")
+    
+    # Se não existe localmente, tenta baixar
     model_path = download_model_from_release()
     
     if model_path is None:
+        st.error("❌ **INSTRUÇÕES PARA RESOLVER:**")
+        st.markdown("""
+        **Opção 1 - Solução Rápida:**
+        - Coloque o arquivo `car_damage_best.pt` na mesma pasta do `streamlit_app.py`
+        
+        **Opção 2 - Solução Definitiva:**
+        1. Vá para: https://github.com/Vamap91/YOLOProject
+        2. Clique em **"Releases"** → **"Create a new release"**
+        3. Faça upload do arquivo `car_damage_best.pt`
+        4. Copie a URL de download e atualize o código
+        """)
         return None
         
     if not os.path.exists(model_path):
@@ -265,8 +304,12 @@ def main():
         4. Geração de relatório detalhado.
         """)
         
-        st.header("⚙️ Configuração do Modelo")
-        st.info("🔗 **Importante**: Para usar este sistema, você precisa configurar a URL do modelo no código. Veja o arquivo GUIA_DEPLOY_MODELO_GRANDE.md")
+        st.header("⚙️ Status do Modelo")
+        if os.path.exists("car_damage_best.pt"):
+            st.success("✅ Modelo encontrado localmente")
+        else:
+            st.warning("⚠️ Modelo não encontrado")
+            st.info("Coloque o arquivo 'car_damage_best.pt' na pasta do projeto")
         
         st.header("Informações do Veículo (Opcional)")
         vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
@@ -276,9 +319,7 @@ def main():
 
     model = load_model()
     if model is None:
-        st.error("❌ Não foi possível carregar o modelo. Verifique a configuração.")
-        st.info("💡 **Dica**: Se você está executando pela primeira vez, certifique-se de que a URL do modelo está configurada corretamente no código.")
-        return
+        st.stop()  # Para a execução se não conseguir carregar o modelo
 
     st.success("✅ Modelo carregado com sucesso!")
 
