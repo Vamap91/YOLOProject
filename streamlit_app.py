@@ -211,7 +211,9 @@ def create_damage_report_json(damage_analysis, vehicle_info):
     total_cost = 0
     
     for damage in damage_analysis:
-        severity_count[damage['severity']] += 1
+        severity = damage.get('severity', 'Indefinido')
+        if severity in severity_count:
+            severity_count[severity] += 1
         if damage['class_display'] not in damage_types:
             damage_types.append(damage['class_display'])
         total_cost += damage['estimated_cost']
