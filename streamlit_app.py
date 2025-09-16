@@ -40,11 +40,6 @@ DAMAGE_CONFIG = {
         'scratch': 'Pintura',
         'crack': 'Para-choque/Plásticos'
     },
-    'cost_ranges': {
-        'Severo': (1500, 3500),
-        'Moderado': (500, 1500),
-        'Leve': (200, 600)
-    },
     'class_names': {
         'shattered_glass': 'Vidro Quebrado',
         'broken_lamp': 'Lâmpada Quebrada',
@@ -149,8 +144,6 @@ def create_damage_analysis(detections):
         class_name = detection['class']
         severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Indefinido')
         location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
-        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
-        estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
         
         damage_report.append({
             'damage_id': f"DMG_{i+1:03d}",
@@ -159,7 +152,6 @@ def create_damage_analysis(detections):
             'confidence': detection['confidence'],
             'severity': severity,
             'location': location,
-            'estimated_cost': estimated_cost,
             'bbox': detection['bbox']
         })
     return damage_report
