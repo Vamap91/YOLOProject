@@ -1,346 +1,362 @@
 import streamlit as st
+import numpy as np
 from PIL import Image
-import pandas as pd
+import os
 import json
-import datetime
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import re
+from datetime import datetime
+import plotly.express as px
+import pandas as pd
+from ultralytics import YOLO
+import requests
+from pathlib import Path
+
+try:
+    import cv2
+except ImportError:
+    st.warning("OpenCV não está instalado, a anotação de imagens pode não funcionar como esperado.")
+    cv2 = None
 
 st.set_page_config(
-    page_title="Carglass - LLaMA Vision Detector",
-    page_icon="🛡️",
-    layout="wide"
+    page_title="Carglass - Detector de Danos Veiculares",
+    page_icon="🚗",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-@st.cache_resource
-def load_llama_model():
-    try:
-        model_name = "Kakyoin03/car-damage-detection-llama-vision-14k"
-        
-        st.info("🔄 Carregando modelo LLaMA Vision (pode levar alguns minutos)...")
-        
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            trust_remote_code=True
-        )
-        
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        st.success("✅ Modelo LLaMA Vision carregado com sucesso!")
-        return model, tokenizer, True
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar modelo LLaMA: {e}")
-        return None, None, False
-
-def analyze_car_damage_llama(image, model, tokenizer):
-    try:
-        prompt = """Analise esta imagem de veículo e forneça um relatório detalhado dos danos em formato JSON com as seguintes informações:
-
-{
-  "danos_detectados": [
-    {
-      "tipo": "tipo do dano",
-      "localizacao": "localização específica",
-      "severidade": "Leve/Moderado/Severo",
-      "descricao": "descrição detalhada",
-      "confianca": "porcentagem de confiança"
+DAMAGE_CONFIG = {
+    'severity_map': {
+        'shattered_glass': 'Severo',
+        'broken_lamp': 'Severo',
+        'flat_tire': 'Severo',
+        'dent': 'Moderado',
+        'scratch': 'Leve',
+        'crack': 'Leve'
+    },
+    'location_map': {
+        'shattered_glass': 'Para-brisa/Vidros',
+        'flat_tire': 'Rodas',
+        'broken_lamp': 'Faróis/Lanternas',
+        'dent': 'Carroceria',
+        'scratch': 'Pintura',
+        'crack': 'Para-choque/Plásticos'
+    },
+    'cost_ranges': {
+        'Severo': (1500, 3500),
+        'Moderado': (500, 1500),
+        'Leve': (200, 600)
+    },
+    'class_names': {
+        'shattered_glass': 'Vidro Quebrado',
+        'broken_lamp': 'Lâmpada Quebrada',
+        'flat_tire': 'Pneu Vazio',
+        'dent': 'Amassado',
+        'scratch': 'Risco',
+        'crack': 'Rachadura'
     }
-  ],
-  "resumo": {
-    "total_danos": "número",
-    "severidade_geral": "classificação geral",
-    "areas_afetadas": ["lista de áreas"],
-    "custo_estimado": "estimativa em reais"
-  }
 }
 
-Seja preciso e técnico na análise."""
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image", "image": image}
-                ]
-            }
-        ]
-
-        inputs = tokenizer.apply_chat_template(
-            messages, 
-            return_tensors="pt", 
-            add_generation_prompt=True
-        )
-
-        with torch.no_grad():
-            outputs = model.generate(
-                inputs,
-                max_new_tokens=800,
-                temperature=0.1,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        analysis = response.split("assistant")[-1].strip()
+def download_model_from_release():
+    """Baixa o modelo do GitHub Releases se não existir localmente."""
+    model_path = "car_damage_best.pt"
+    
+    if not os.path.exists(model_path):
+        st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        return parse_llama_response(analysis)
+        # SUBSTITUA ESTA URL pela URL do seu GitHub Release
+        # Formato: https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/TAG/car_damage_best.pt
+        model_url = "https://github.com/SEU_USUARIO/SEU_REPO/releases/download/v1.0.0/car_damage_best.pt"
         
+        try:
+            response = requests.get(model_url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with open(model_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = downloaded / total_size
+                            progress_bar.progress(progress)
+                            status_text.text(f"Baixando: {downloaded / 1024 / 1024:.1f}MB / {total_size / 1024 / 1024:.1f}MB")
+            
+            progress_bar.empty()
+            status_text.empty()
+            st.success("✅ Modelo baixado com sucesso!")
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ Erro ao baixar o modelo: {e}")
+            st.error("Verifique se a URL do modelo está correta no código.")
+            return None
+        except Exception as e:
+            st.error(f"❌ Erro inesperado: {e}")
+            return None
+    
+    return model_path
+
+@st.cache_resource
+def load_model():
+    """Carrega o modelo YOLOv8 treinado para detecção de danos."""
+    
+    # Primeiro, tenta baixar o modelo se necessário
+    model_path = download_model_from_release()
+    
+    if model_path is None:
+        return None
+        
+    if not os.path.exists(model_path):
+        st.error(f"Modelo '{model_path}' não encontrado após o download.")
+        return None
+        
+    try:
+        model = YOLO(model_path)
+        return model
     except Exception as e:
-        st.error(f"Erro na análise: {e}")
+        st.error(f"Erro ao carregar o modelo: {str(e)}")
         return None
 
-def parse_llama_response(response):
-    try:
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-            return json.loads(json_str)
-        else:
-            return parse_text_response(response)
-    except:
-        return parse_text_response(response)
-
-def parse_text_response(response):
+def process_image(image, model):
+    """Processa a imagem com o modelo YOLO e retorna as detecções e a imagem anotada."""
+    img_array = np.array(image)
+    results = model(img_array)
+    
     detections = []
+    if len(results[0].boxes) > 0:
+        for box in results[0].boxes:
+            class_id = int(box.cls)
+            class_name = model.names[class_id]
+            detection = {
+                'class': class_name,
+                'confidence': float(box.conf),
+                'bbox': box.xyxy[0].cpu().numpy().tolist()
+            }
+            detections.append(detection)
     
-    damage_keywords = {
-        'risco': 'Risco',
-        'scratch': 'Risco', 
-        'amassado': 'Amassado',
-        'dent': 'Amassado',
-        'rachadura': 'Rachadura',
-        'crack': 'Rachadura',
-        'quebrado': 'Vidro Quebrado',
-        'broken': 'Vidro Quebrado',
-        'deformação': 'Deformação'
-    }
+    annotated_img = results[0].plot()
+    if cv2 is not None:
+        annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
     
-    severity_keywords = {
-        'leve': 'Leve',
-        'light': 'Leve',
-        'moderado': 'Moderado',
-        'moderate': 'Moderado',
-        'severo': 'Severo',
-        'severe': 'Severo',
-        'grave': 'Severo'
-    }
-    
-    lines = response.split('\n')
-    damage_count = 0
-    
-    for line in lines:
-        line_lower = line.lower()
+    return detections, annotated_img
+
+def create_damage_analysis(detections):
+    """Analisa as detecções de danos para gerar um relatório detalhado."""
+    damage_report = []
+    for i, detection in enumerate(detections):
+        class_name = detection['class']
+        severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Indefinido')
+        location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
+        cost_range = DAMAGE_CONFIG['cost_ranges'].get(severity, (0, 0))
+        estimated_cost = int(np.random.randint(cost_range[0], cost_range[1])) if sum(cost_range) > 0 else 0
         
-        for keyword, damage_type in damage_keywords.items():
-            if keyword in line_lower:
-                damage_count += 1
-                
-                severity = 'Moderado'
-                for sev_key, sev_val in severity_keywords.items():
-                    if sev_key in line_lower:
-                        severity = sev_val
-                        break
-                
-                location = 'Carroceria'
-                if 'frente' in line_lower or 'front' in line_lower:
-                    location = 'Frente'
-                elif 'traseira' in line_lower or 'rear' in line_lower:
-                    location = 'Traseira'
-                elif 'lateral' in line_lower or 'side' in line_lower:
-                    location = 'Lateral'
-                elif 'porta' in line_lower or 'door' in line_lower:
-                    location = 'Porta'
-                elif 'capô' in line_lower or 'hood' in line_lower:
-                    location = 'Capô'
-                
-                detection = {
-                    'tipo': damage_type,
-                    'localizacao': location,
-                    'severidade': severity,
-                    'descricao': line.strip(),
-                    'confianca': '85%'
-                }
-                detections.append(detection)
-                break
-    
-    if not detections:
-        detections.append({
-            'tipo': 'Dano Detectado',
-            'localizacao': 'Veículo',
-            'severidade': 'Moderado',
-            'descricao': 'Análise detectou possíveis danos no veículo',
-            'confianca': '75%'
+        damage_report.append({
+            'damage_id': f"DMG_{i+1:03d}",
+            'class': class_name,
+            'class_display': DAMAGE_CONFIG['class_names'].get(class_name, class_name.replace('_', ' ').title()),
+            'confidence': detection['confidence'],
+            'severity': severity,
+            'location': location,
+            'estimated_cost': estimated_cost,
+            'bbox': detection['bbox']
         })
-    
-    return {
-        'danos_detectados': detections,
-        'resumo': {
-            'total_danos': len(detections),
-            'severidade_geral': 'Moderado',
-            'areas_afetadas': list(set([d['localizacao'] for d in detections])),
-            'custo_estimado': f'R$ {len(detections) * 800:,.2f}'
-        }
-    }
+    return damage_report
 
-def create_damage_report_json(vehicle_info, analysis_result):
-    if not analysis_result:
-        return {"error": "Falha na análise"}
+def create_detection_summary(detections):
+    """Cria um resumo em texto das detecções."""
+    if not detections:
+        return "Nenhum dano detectado na imagem."
     
-    detections = []
-    for i, dano in enumerate(analysis_result.get('danos_detectados', [])):
-        detection = {
-            'id': i + 1,
-            'damage_type': dano.get('tipo', 'Dano'),
-            'severity': dano.get('severidade', 'Moderado'),
-            'location': dano.get('localizacao', 'Carroceria'),
-            'confidence': float(dano.get('confianca', '80%').replace('%', '')) / 100,
-            'description': dano.get('descricao', 'Dano detectado'),
-            'bbox': {'x1': 0, 'y1': 0, 'x2': 100, 'y2': 100}
-        }
-        detections.append(detection)
+    damage_counts = {}
+    for detection in detections:
+        class_name = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'])
+        if class_name not in damage_counts:
+            damage_counts[class_name] = []
+        damage_counts[class_name].append(detection['confidence'])
     
-    resumo = analysis_result.get('resumo', {})
+    summary = [f"**Total de danos detectados: {len(detections)}**\n"]
+    for damage_type, confidences in damage_counts.items():
+        count = len(confidences)
+        avg_confidence = np.mean(confidences)
+        summary.append(f"• **{damage_type}**: {count} detectado(s) - Confiança média: {avg_confidence:.1%}")
     
+    return "\n".join(summary)
+
+def create_confidence_chart(damage_analysis):
+    """Cria um gráfico de barras com a confiança das detecções."""
+    if not damage_analysis:
+        return None
+    
+    df = pd.DataFrame(damage_analysis)
+    fig = px.bar(
+        df, 
+        x='class_display', 
+        y='confidence',
+        title='Confiança das Detecções por Tipo de Dano',
+        labels={'confidence': 'Confiança (%)', 'class_display': 'Tipo de Dano'},
+        color='confidence',
+        color_continuous_scale='RdYlGn',
+        text='confidence'
+    )
+    fig.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+    fig.update_layout(xaxis_tickangle=-45, height=400, showlegend=False, yaxis=dict(tickformat='.0%'))
+    return fig
+
+def create_damage_report_json(damage_analysis, vehicle_info):
+    """Gera o relatório final em formato JSON."""
+    severity_count = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
+    damage_types = []
+    total_cost = 0
+    
+    for damage in damage_analysis:
+        severity_count[damage['severity']] += 1
+        if damage['class_display'] not in damage_types:
+            damage_types.append(damage['class_display'])
+        total_cost += damage['estimated_cost']
+    
+    urgency = 'Baixa'
+    if severity_count['Severo'] > 0:
+        urgency = 'Alta'
+    elif severity_count['Moderado'] > 0:
+        urgency = 'Média'
+
     report = {
         "inspection_info": {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "inspector": "LLaMA Vision AI",
-            "version": "6.0",
-            "model": "Kakyoin03/car-damage-detection-llama-vision-14k"
+            "timestamp": datetime.now().isoformat(),
+            "inspector": "Sistema IA Carglass",
+            "version": "2.0",
+            "model": "YOLOv8 (car_damage_best.pt)",
         },
         "vehicle_info": vehicle_info,
-        "damage_summary": {
-            "total_damages": resumo.get('total_danos', len(detections)),
-            "severity_count": {
-                "Leve": len([d for d in detections if d['severity'] == 'Leve']),
-                "Moderado": len([d for d in detections if d['severity'] == 'Moderado']),
-                "Severo": len([d for d in detections if d['severity'] == 'Severo'])
-            },
-            "damage_types": list(set([d['damage_type'] for d in detections])),
-            "estimated_total_cost": resumo.get('custo_estimado', 'R$ 1.500,00'),
-            "affected_areas": resumo.get('areas_afetadas', ['Carroceria'])
+        "damage_analysis": {
+            "total_damages": len(damage_analysis),
+            "severity_count": severity_count,
+            "damage_types": sorted(list(set(d['class_display'] for d in damage_analysis))),
+            "estimated_total_cost": f"R$ {total_cost:,.2f}",
+            "repair_urgency": urgency,
         },
-        "detections": detections,
-        "llama_analysis": analysis_result
+        "damages": damage_analysis
     }
     return report
 
-st.image("https://logodownload.org/wp-content/uploads/2019/11/carglass-logo-0.png", width=250)
-st.title("🛡️ Sistema LLaMA Vision - Detecção Avançada")
-st.markdown("**Análise inteligente de danos com modelo LLaMA Vision 11B**")
+def main():
+    """Função principal que executa a aplicação Streamlit."""
+    st.markdown("""
+    <div style='background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 1rem; border-radius: 10px; margin-bottom: 2rem;'>
+        <h1 style='color: white; text-align: center; margin: 0;'>🚗 Carglass - Detector de Danos Veiculares</h1>
+        <p style='color: white; text-align: center; margin: 0.5rem 0 0 0;'>Análise de danos em tempo real com Inteligência Artificial</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-model, tokenizer, model_loaded = load_llama_model()
-
-if not model_loaded:
-    st.error("❌ Não foi possível carregar o modelo LLaMA Vision.")
-    st.info("💡 **Alternativa:** Use o modelo YOLO11m que funciona de forma mais estável.")
-    st.stop()
-
-st.success("🧠 **Modelo LLaMA Vision Ativo** - Análise avançada com IA conversacional")
-st.info("🎯 **Capacidades:** Detecção precisa, localização específica, relatórios detalhados em linguagem natural")
-
-st.sidebar.header("📋 Informações do Veículo")
-vehicle_plate = st.sidebar.text_input("Placa", "ABC-1234")
-vehicle_model = st.sidebar.text_input("Modelo", "Toyota Corolla")
-vehicle_year = st.sidebar.number_input("Ano", min_value=1990, max_value=2025, value=2020)
-vehicle_color = st.sidebar.selectbox("Cor", ["Branco", "Preto", "Prata", "Azul", "Vermelho", "Outro"])
-
-vehicle_info = {
-    "plate": vehicle_plate,
-    "model": vehicle_model,
-    "year": vehicle_year,
-    "color": vehicle_color
-}
-
-st.sidebar.header("📤 Upload da Imagem")
-uploaded_file = st.sidebar.file_uploader("Selecione uma imagem do veículo:", type=['png', 'jpg', 'jpeg'])
-
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    
-    st.header("🧠 Análise com LLaMA Vision")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📷 Imagem Original")
-        st.image(image, use_column_width=True)
-    
-    with col2:
-        st.subheader("🤖 Análise IA")
+    with st.sidebar:
+        st.header("Sobre o Sistema")
+        st.markdown("""
+        **Versão 2.0**
         
-        if st.button("🔍 Analisar com LLaMA Vision", type="primary"):
-            with st.spinner("🧠 LLaMA Vision analisando a imagem..."):
-                analysis_result = analyze_car_damage_llama(image, model, tokenizer)
+        Este sistema utiliza um modelo de IA (YOLOv8) treinado especificamente para **identificar e classificar danos em veículos** a partir de imagens.
+        
+        **Funcionalidades:**
+        1. Detecção de 6 tipos de danos.
+        2. Classificação de severidade.
+        3. Estimativa de custo de reparo.
+        4. Geração de relatório detalhado.
+        """)
+        
+        st.header("⚙️ Configuração do Modelo")
+        st.info("🔗 **Importante**: Para usar este sistema, você precisa configurar a URL do modelo no código. Veja o arquivo GUIA_DEPLOY_MODELO_GRANDE.md")
+        
+        st.header("Informações do Veículo (Opcional)")
+        vehicle_plate = st.text_input("Placa", placeholder="ABC-1234")
+        vehicle_model = st.text_input("Modelo", placeholder="Ex: Toyota Corolla")
+        vehicle_year = st.number_input("Ano", min_value=1990, max_value=datetime.now().year + 1, value=datetime.now().year)
+        vehicle_color = st.text_input("Cor", placeholder="Ex: Branco")
+
+    model = load_model()
+    if model is None:
+        st.error("❌ Não foi possível carregar o modelo. Verifique a configuração.")
+        st.info("💡 **Dica**: Se você está executando pela primeira vez, certifique-se de que a URL do modelo está configurada corretamente no código.")
+        return
+
+    st.success("✅ Modelo carregado com sucesso!")
+
+    st.header("1. Upload da Imagem do Veículo")
+    uploaded_file = st.file_uploader(
+        "Escolha uma imagem para análise:",
+        type=['png', 'jpg', 'jpeg'],
+        help="Envie uma imagem de um veículo para que a IA possa detectar os danos."
+    )
+
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file).convert("RGB")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📸 Imagem Original")
+            st.image(image, caption=f"Imagem original: {uploaded_file.name}", use_column_width=True)
+        
+        with st.spinner("🔍 Analisando imagem em busca de danos..."):
+            detections, annotated_img = process_image(image, model)
+            damage_analysis = create_damage_analysis(detections)
+
+        with col2:
+            st.subheader("🎯 Danos Detectados")
+            st.image(annotated_img, caption="Imagem com os danos destacados pela IA.", use_column_width=True)
+
+        if not detections:
+            st.success("✅ Nenhuma avaria detectada na imagem!")
+            st.balloons()
+        else:
+            st.header("2. Resultados da Análise")
+            total_cost = sum(d['estimated_cost'] for d in damage_analysis)
+            urgency = create_damage_report_json(damage_analysis, {})['damage_analysis']['repair_urgency']
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🔍 Total de Danos", len(damage_analysis))
+            c2.metric("💰 Custo Total Estimado", f"R$ {total_cost:,.2f}")
+            c3.metric("⚠️ Urgência de Reparo", urgency)
+
+            st.markdown("### Resumo dos Danos")
+            summary = create_detection_summary(detections)
+            st.markdown(summary)
+
+            st.markdown("### Detalhes dos Danos")
+            df_display = pd.DataFrame(damage_analysis)[['class_display', 'severity', 'confidence', 'estimated_cost']]
+            df_display['confidence'] = df_display['confidence'].apply(lambda x: f"{x:.1%}")
+            df_display['estimated_cost'] = df_display['estimated_cost'].apply(lambda x: f"R$ {x:,.2f}")
+            df_display.columns = ['Tipo de Dano', 'Severidade', 'Confiança', 'Custo Estimado']
+            st.dataframe(df_display, use_container_width=True)
+
+            st.markdown("### Gráfico de Confiança")
+            chart = create_confidence_chart(damage_analysis)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True)
+
+            st.header("3. Relatório de Inspeção")
+            vehicle_info = {
+                "plate": vehicle_plate or "Não informado",
+                "model": vehicle_model or "Não informado",
+                "year": str(vehicle_year),
+                "color": vehicle_color or "Não informado"
+            }
+            report = create_damage_report_json(damage_analysis, vehicle_info)
+            report_json = json.dumps(report, indent=2, ensure_ascii=False)
             
-            if analysis_result:
-                st.success("✅ Análise concluída!")
-                
-                resumo = analysis_result.get('resumo', {})
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total de Danos", resumo.get('total_danos', 0))
-                with col2:
-                    st.metric("Severidade Geral", resumo.get('severidade_geral', 'N/A'))
-                with col3:
-                    st.metric("Custo Estimado", resumo.get('custo_estimado', 'N/A'))
-                
-                st.subheader("📋 Danos Detectados")
-                
-                for i, dano in enumerate(analysis_result.get('danos_detectados', []), 1):
-                    with st.expander(f"Dano {i}: {dano.get('tipo', 'N/A')} - {dano.get('localizacao', 'N/A')}"):
-                        st.write(f"**Tipo:** {dano.get('tipo', 'N/A')}")
-                        st.write(f"**Localização:** {dano.get('localizacao', 'N/A')}")
-                        st.write(f"**Severidade:** {dano.get('severidade', 'N/A')}")
-                        st.write(f"**Confiança:** {dano.get('confianca', 'N/A')}")
-                        st.write(f"**Descrição:** {dano.get('descricao', 'N/A')}")
-                
-                st.header("📄 Relatório JSON Completo")
-                report_json = create_damage_report_json(vehicle_info, analysis_result)
-                st.json(report_json)
-                
-                json_str = json.dumps(report_json, indent=2, ensure_ascii=False)
-                st.download_button(
-                    label="💾 Baixar Relatório JSON",
-                    data=json_str,
-                    file_name=f"relatorio_llama_{vehicle_plate}_{datetime.date.today().strftime('%Y%m%d')}.json",
-                    mime="application/json"
-                )
-            else:
-                st.error("❌ Falha na análise. Tente novamente.")
+            st.download_button(
+                label="📄 Baixar Relatório Completo (JSON)",
+                data=report_json,
+                file_name=f"relatorio_danos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json"
+            )
+            with st.expander("Visualizar JSON do Relatório"):
+                st.json(report)
+    else:
+        st.info("👆 **Aguardando imagem para análise.**")
 
-else:
-    st.info("👆 Aguardando o envio de uma imagem na barra lateral.")
-    
-    st.header("🧠 Sobre o LLaMA Vision")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        **🎯 Capacidades Avançadas:**
-        - Detecção de riscos, amassados, rachaduras
-        - Localização precisa (porta, capô, para-choque)
-        - Avaliação de severidade inteligente
-        - Relatórios em linguagem natural
-        - Suporte multilíngue (PT/EN/FR)
-        """)
-    
-    with col2:
-        st.markdown("""
-        **⚡ Performance:**
-        - Modelo: LLaMA 3.2 11B Vision
-        - Dataset: 14.000 imagens de treinamento
-        - Loss final: 0.0758 (excelente)
-        - Precisão: 90%+ em danos visíveis
-        - Tempo: ~10-30 segundos por análise
-        """)
+    st.markdown("---")
+    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com ❤️ pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
 
-st.markdown("---")
-st.markdown("**Carglass - LLaMA Vision AI** | Análise Inteligente de Danos")
+if __name__ == "__main__":
+    main()
