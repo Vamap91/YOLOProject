@@ -63,8 +63,8 @@ def download_model_from_release():
         st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
         # SUBSTITUA ESTA URL pela URL do seu GitHub Release
-        # Formato: https://github.com/SEU_USUARIO/SEU_REPOSITORIO/releases/download/TAG/car_damage_best.pt
-        model_url = "https://github.com/SEU_USUARIO/SEU_REPO/releases/download/v1.0.0/car_damage_best.pt"
+        # Formato: https://github.com/Vamap91/YOLOProject/releases/download/TAG/car_damage_best.pt
+        model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v1.0.0/car_damage_best.pt"
         
         try:
             response = requests.get(model_url, stream=True)
