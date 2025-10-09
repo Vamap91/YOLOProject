@@ -61,6 +61,13 @@ DAMAGE_CONFIG = {
 def download_model_from_release():
     model_path = "car_damage_best.pt"
     
+    if os.path.exists(model_path):
+        try:
+            os.remove(model_path)
+            st.info("🔄 Removendo modelo antigo do cache...")
+        except:
+            pass
+    
     if not os.path.exists(model_path):
         st.info("📄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
