@@ -374,7 +374,7 @@ def main():
         st.info("👆 **Aguardando imagem para análise.**")
 
     st.markdown("---")
-    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com ❤️ pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
