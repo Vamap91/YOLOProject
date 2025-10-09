@@ -47,17 +47,23 @@ DAMAGE_CONFIG = {
         'dent': 'Amassado',
         'scratch': 'Risco',
         'crack': 'Rachadura'
+    },
+    'cost_estimate': {
+        'shattered_glass': (800, 2500),
+        'broken_lamp': (300, 1500),
+        'flat_tire': (200, 800),
+        'dent': (500, 2000),
+        'scratch': (150, 800),
+        'crack': (200, 1000)
     }
 }
 
 def download_model_from_release():
-    """Baixa o modelo do GitHub Releases se não existir localmente."""
     model_path = "car_damage_best.pt"
     
     if not os.path.exists(model_path):
-        st.info("🔄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
+        st.info("📄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        # URL CORRETA - ATUALIZADA PARA SEU REPOSITÓRIO
         model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
         
         try:
@@ -95,9 +101,6 @@ def download_model_from_release():
 
 @st.cache_resource
 def load_model():
-    """Carrega o modelo YOLOv8 treinado para detecção de danos."""
-    
-    # Primeiro, tenta baixar o modelo se necessário
     model_path = download_model_from_release()
     
     if model_path is None:
@@ -115,7 +118,6 @@ def load_model():
         return None
 
 def process_image(image, model):
-    """Processa a imagem com o modelo YOLO e retorna as detecções e a imagem anotada."""
     img_array = np.array(image)
     results = model(img_array)
     
@@ -138,12 +140,13 @@ def process_image(image, model):
     return detections, annotated_img
 
 def create_damage_analysis(detections):
-    """Analisa as detecções de danos para gerar um relatório detalhado."""
     damage_report = []
     for i, detection in enumerate(detections):
         class_name = detection['class']
         severity = DAMAGE_CONFIG['severity_map'].get(class_name, 'Indefinido')
         location = DAMAGE_CONFIG['location_map'].get(class_name, 'N/A')
+        cost_range = DAMAGE_CONFIG['cost_estimate'].get(class_name, (0, 0))
+        estimated_cost = np.mean(cost_range)
         
         damage_report.append({
             'damage_id': f"DMG_{i+1:03d}",
@@ -152,12 +155,12 @@ def create_damage_analysis(detections):
             'confidence': detection['confidence'],
             'severity': severity,
             'location': location,
-            'bbox': detection['bbox']
+            'bbox': detection['bbox'],
+            'estimated_cost': estimated_cost
         })
     return damage_report
 
 def create_detection_summary(detections):
-    """Cria um resumo em texto das detecções."""
     if not detections:
         return "Nenhum dano detectado na imagem."
     
@@ -177,7 +180,6 @@ def create_detection_summary(detections):
     return "\n".join(summary)
 
 def create_confidence_chart(damage_analysis):
-    """Cria um gráfico de barras com a confiança das detecções."""
     if not damage_analysis:
         return None
     
@@ -197,7 +199,6 @@ def create_confidence_chart(damage_analysis):
     return fig
 
 def create_damage_report_json(damage_analysis, vehicle_info):
-    """Gera o relatório final em formato JSON."""
     severity_count = {'Leve': 0, 'Moderado': 0, 'Severo': 0}
     damage_types = []
     total_cost = 0
@@ -236,7 +237,6 @@ def create_damage_report_json(damage_analysis, vehicle_info):
     return report
 
 def main():
-    """Função principal que executa a aplicação Streamlit."""
     st.markdown("""
     <div style='background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 1rem; border-radius: 10px; margin-bottom: 2rem;'>
         <h1 style='color: white; text-align: center; margin: 0;'>🚗 Carglass - Detector de Danos Veiculares</h1>
