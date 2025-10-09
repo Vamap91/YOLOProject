@@ -59,7 +59,8 @@ DAMAGE_CONFIG = {
 }
 
 def download_model_from_release():
-    model_path = "car_damage_best.pt"
+    MODEL_VERSION = "v2.0.0"
+    model_path = f"car_damage_best_{MODEL_VERSION}.pt"
     
     if os.path.exists(model_path):
         try:
@@ -71,7 +72,7 @@ def download_model_from_release():
     if not os.path.exists(model_path):
         st.info("📄 Baixando modelo... (primeira execução, pode levar alguns minutos)")
         
-        model_url = "https://github.com/Vamap91/YOLOProject/releases/download/v2.0.0/car_damage_best.pt"
+        model_url = f"https://github.com/Vamap91/YOLOProject/releases/download/{MODEL_VERSION}/car_damage_best.pt"
         
         try:
             response = requests.get(model_url, stream=True)
@@ -140,11 +141,27 @@ def process_image(image, model):
             }
             detections.append(detection)
     
-    annotated_img = results[0].plot()
+    annotated_frame = results[0].plot()
     if cv2 is not None:
-        annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+        annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+        
+        for detection in detections:
+            class_display = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'])
+            bbox = detection['bbox']
+            x1, y1, x2, y2 = map(int, bbox)
+            
+            label = f"{class_display} {detection['confidence']:.0%}"
+            
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            thickness = 2
+            
+            (text_width, text_height), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+            
+            cv2.rectangle(annotated_frame, (x1, y1 - text_height - 10), (x1 + text_width, y1), (0, 255, 0), -1)
+            cv2.putText(annotated_frame, label, (x1, y1 - 5), font, font_scale, (0, 0, 0), thickness)
     
-    return detections, annotated_img
+    return detections, annotated_frame
 
 def create_damage_analysis(detections):
     damage_report = []
@@ -355,7 +372,7 @@ def main():
         st.info("👆 **Aguardando imagem para análise.**")
 
     st.markdown("---")
-    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com ❤️ pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
