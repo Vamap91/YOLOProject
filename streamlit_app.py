@@ -141,25 +141,27 @@ def process_image(image, model):
             }
             detections.append(detection)
     
-    annotated_frame = results[0].plot()
+    annotated_frame = img_array.copy()
+    
     if cv2 is not None:
-        annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-        
         for detection in detections:
             class_display = DAMAGE_CONFIG['class_names'].get(detection['class'], detection['class'])
             bbox = detection['bbox']
             x1, y1, x2, y2 = map(int, bbox)
+            confidence = detection['confidence']
             
-            label = f"{class_display} {detection['confidence']:.0%}"
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            
+            label = f"{class_display} {confidence:.0%}"
             
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.6
+            font_scale = 0.7
             thickness = 2
             
             (text_width, text_height), baseline = cv2.getTextSize(label, font, font_scale, thickness)
             
-            cv2.rectangle(annotated_frame, (x1, y1 - text_height - 10), (x1 + text_width, y1), (0, 255, 0), -1)
-            cv2.putText(annotated_frame, label, (x1, y1 - 5), font, font_scale, (0, 0, 0), thickness)
+            cv2.rectangle(annotated_frame, (x1, y1 - text_height - 10), (x1 + text_width + 10, y1), (0, 255, 0), -1)
+            cv2.putText(annotated_frame, label, (x1 + 5, y1 - 5), font, font_scale, (0, 0, 0), thickness)
     
     return detections, annotated_frame
 
