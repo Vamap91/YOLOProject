@@ -17,7 +17,7 @@ except ImportError:
     cv2 = None
 
 st.set_page_config(
-    page_title="Carglass - Detector de Danos Veiculares",
+    page_title="Detector de Danos Veiculares",
     page_icon="🚗",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -246,7 +246,7 @@ def create_damage_report_json(damage_analysis, vehicle_info):
     report = {
         "inspection_info": {
             "timestamp": datetime.now().isoformat(),
-            "inspector": "Sistema IA Carglass",
+            "inspector": "Sistema IA",
             "version": "2.0",
             "model": "YOLOv8 (car_damage_best.pt)",
         },
@@ -265,7 +265,7 @@ def create_damage_report_json(damage_analysis, vehicle_info):
 def main():
     st.markdown("""
     <div style='background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); padding: 1rem; border-radius: 10px; margin-bottom: 2rem;'>
-        <h1 style='color: white; text-align: center; margin: 0;'>🚗 Carglass - Detector de Danos Veiculares</h1>
+        <h1 style='color: white; text-align: center; margin: 0;'>🚗 Detector de Danos Veiculares</h1>
         <p style='color: white; text-align: center; margin: 0.5rem 0 0 0;'>Análise de danos em tempo real com Inteligência Artificial</p>
     </div>
     """, unsafe_allow_html=True)
@@ -374,7 +374,7 @@ def main():
         st.info("👆 **Aguardando imagem para análise.**")
 
     st.markdown("---")
-    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com pela equipe de IA da Carglass</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: grey;'>Desenvolvido com por Vinicius Paschoa</p>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
